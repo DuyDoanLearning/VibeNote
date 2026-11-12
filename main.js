@@ -22,8 +22,8 @@ const STATUSES = ['active', 'onhold', 'completed', 'dropped'];
 const DEFAULT_SETTINGS = {
   theme: 'system',
   editorFont: 'mono',
-  fontSize: 15,
-  lineWidth: 'medium',
+  fontSize: 14,
+  lineWidth: 'full',
   lineNumbers: false,
   vim: false,
   spellcheck: false,
@@ -269,8 +269,8 @@ async function snapshot(file, force) {
 // ---------- export ----------
 const EXPORT_VARS = `:root{--bg:#fff;--panel:#f6f6f9;--border:#e6e5ec;--text:#1f2028;--muted:#6b6d7c;--faint:#a4a6b4;
 --accent:#6d4aff;--accent-soft:rgba(109,74,255,.1);--code:#c2410c;--code-bg:#f3f2f7;--hover:rgba(0,0,0,.045);
---sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",sans-serif;--mono:"SF Mono",ui-monospace,Menlo,monospace;--line-width:780px}
-body{margin:0;padding:40px 24px;background:#fff}`;
+--sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",sans-serif;--mono:"SF Mono",ui-monospace,Menlo,monospace;--line-width:none}
+body{margin:0;padding:40px 24px;background:#fff}.markdown{max-width:780px;margin:0 auto}`;
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 function exportDoc(title, html, forPdf) {

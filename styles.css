@@ -191,7 +191,7 @@ body.single .toolbar { padding-left: 84px; }
 
 /* ---------- main ---------- */
 #main { display: flex; flex-direction: column; min-width: 0; position: relative; background: var(--bg); }
-.toolbar { display: flex; align-items: center; padding: 8px 12px 0 16px; height: 50px; }
+.toolbar { display: flex; align-items: center; padding: 8px 12px 0 14px; height: 50px; }
 .tools { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 #trash-tools { display: none; }
 body.in-trash #note-tools, body.in-trash #metabar { display: none; }
@@ -207,7 +207,7 @@ body.in-trash #trash-tools { display: flex; }
 
 #metabar {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
-  padding: 2px 16px 8px; border-bottom: 1px solid var(--border);
+  padding: 2px 20px 8px; border-bottom: 1px solid var(--border);
 }
 .status-pick {
   display: flex; align-items: center; gap: 6px; padding: 2px 4px 2px 8px; border-radius: 999px;
@@ -231,7 +231,7 @@ body.in-trash #trash-tools { display: flex; }
 #panes.preview #editor { display: none; }
 #editor { min-height: 0; min-width: 0; user-select: text; }
 #panes.split #editor { border-right: 1px solid var(--border); }
-#preview { overflow-y: auto; min-width: 0; padding: 28px 36px 30vh; user-select: text; }
+#preview { overflow-y: auto; min-width: 0; padding: 14px 24px 30vh; user-select: text; }
 
 #status {
   display: flex; justify-content: flex-end; gap: 14px;

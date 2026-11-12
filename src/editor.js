@@ -29,8 +29,8 @@ const mdHighlight = HighlightStyle.define([
 
 const theme = EditorView.theme({
   '&': { height: '100%', backgroundColor: 'transparent', color: 'var(--text)' },
-  '.cm-scroller': { fontFamily: 'var(--editor-font)', fontSize: 'var(--editor-size)', lineHeight: '1.7' },
-  '.cm-content': { maxWidth: 'var(--line-width)', margin: '0 auto', padding: '28px 32px 40vh', caretColor: 'var(--accent)' },
+  '.cm-scroller': { fontFamily: 'var(--editor-font)', fontSize: 'var(--editor-size)', lineHeight: '1.6' },
+  '.cm-content': { maxWidth: 'var(--line-width)', margin: '0', padding: '14px 24px 40vh', caretColor: 'var(--accent)' },
   '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: 'var(--faint)' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--muted)' },
   '.cm-lineNumbers .cm-gutterElement': { padding: '0 4px 0 14px', fontSize: '0.8em' },
