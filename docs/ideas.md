@@ -1,0 +1,25 @@
+# Ideas backlog
+
+Ideas discussed with the owner (2026-11-13), not yet decided or built. Owner's top picks are marked ⭐.
+
+## Understanding your own code
+1. ⭐ **"Why does this line exist?"**: select a line of code and see the spec note, plan step and change-log entry that created it (git blame for *intent*). Needs commits linked to plan steps and specs.
+2. **Code tours**: Claude writes a tour note with numbered stops; each stop is a clickable file:line link that opens the code beside the explanation.
+3. **Check-your-understanding cards**: after a build step, 2–3 optional quick questions about what changed.
+4. **A living architecture diagram**: Mermaid diagram in the Codebase map, updated after each phase; boxes link to explanation notes.
+5. **Decision notes**: when Claude picks between options, it saves what the options were, why, and the cost of changing later.
+
+## Safer experiments
+6. ⭐ **A branch per spec**: each spec builds on its own git branch; **Try it** launches that build beside the stable app; **Merge** / **Throw away** from the note.
+7. **Tracked changes for Claude's note edits**: snapshot before Claude edits a note, show its edits as accept/reject changes.
+
+## Notes superpowers
+8. ⭐ **Sync through git**: the notes folder becomes a private GitHub repo that VibeNote auto-commits and pushes; conflicts open as mine-vs-theirs. (Owner wants sync between Macs; Mac-only, no mobile.)
+9. **Daily digest note**: what was written, what Claude built, open plan steps.
+10. **Inbox tidy-up**: Claude *suggests* notebook/tags/links for Inbox notes; the user accepts each.
+11. **Graph view** of note links.
+12. **Talk your ideas in**: dictate (Vietnamese or English) → Claude turns it into a spec note.
+
+## Fun
+13. "Explain like I'm 5" toggle on explanation notes.
+14. Weekly recap card.
