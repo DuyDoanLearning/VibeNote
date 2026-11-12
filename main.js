@@ -8,12 +8,13 @@
 // Note metadata (tags, status, pinned) lives in YAML front matter at the top of each file.
 // Revision history is local-only, in <userData>/history/<file inode>/<timestamp>.md.
 
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
 const os = require('os');
 const { pathToFileURL } = require('url');
+const themes = require('./themes');
 
 const isMac = process.platform === 'darwin';
 const TRASH = '.trash';
@@ -27,6 +28,8 @@ const DEFAULT_SETTINGS = {
   lineNumbers: false,
   vim: false,
   spellcheck: false,
+  linkTitles: true,
+  scrollSync: true,
 };
 
 const configPath = () => path.join(app.getPath('userData'), 'config.json');
@@ -485,9 +488,64 @@ ipcMain.handle('settings:get', () => config.settings);
 ipcMain.handle('settings:set', (_e, patch) => {
   config.settings = { ...config.settings, ...patch };
   saveConfig();
-  nativeTheme.themeSource = config.settings.theme;
+  if ('theme' in patch) applyTheme();
   broadcast('settings:changed', config.settings);
   return config.settings;
+});
+
+// ---------- themes ----------
+// settings.theme: 'system' | 'light' | 'dark' | 'vscode' (same as VS Code) | 'theme:<key>' (a specific VS Code theme)
+let currentTheme = null;
+function applyTheme() {
+  const t = config.settings.theme || 'system';
+  let theme = null;
+  if (t === 'vscode' || t.startsWith('theme:')) {
+    nativeTheme.themeSource = 'system';
+    const key = t === 'vscode' ? themes.vscodeThemeKey(nativeTheme.shouldUseDarkColors) : t.slice(6);
+    theme = key ? themes.loadTheme(key) : null;
+  }
+  nativeTheme.themeSource = theme ? theme.type : ['light', 'dark'].includes(t) ? t : 'system';
+  currentTheme = theme;
+  broadcast('theme:changed', theme);
+}
+let vscodeTimer = null;
+themes.watchVscodeSettings(() => {
+  if (config.settings.theme !== 'vscode') return;
+  clearTimeout(vscodeTimer);
+  vscodeTimer = setTimeout(applyTheme, 300);
+});
+
+ipcMain.handle('theme:current', () => currentTheme);
+ipcMain.handle('themes:list', (_e, force) => themes.listThemes(force).map(({ key, label, type, source }) => ({ key, label, type, source })));
+ipcMain.handle('themes:import', async (e) => {
+  const r = await dialog.showOpenDialog(winOf(e), {
+    title: 'Import a VS Code theme',
+    message: 'Choose a theme .json file or a .vsix extension',
+    properties: ['openFile'],
+    filters: [{ name: 'VS Code theme', extensions: ['json', 'jsonc', 'vsix'] }],
+  });
+  if (r.canceled || !r.filePaths[0]) return null;
+  await themes.importTheme(r.filePaths[0]);
+  return themes.listThemes().map(({ key, label, type, source }) => ({ key, label, type, source }));
+});
+
+// ---------- link titles (for pasted URLs) ----------
+const decodeEntities = (s) => s
+  .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+  .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+  .replace(/&(amp|lt|gt|quot|apos|#39|nbsp);/g, (_, n) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", '#39': "'", nbsp: ' ' })[n]);
+ipcMain.handle('link:title', async (_e, url) => {
+  if (!/^https?:\/\//i.test(url)) return null;
+  try {
+    const res = await net.fetch(url, { signal: AbortSignal.timeout(5000), headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X) VibeNote/1.0', Accept: 'text/html' } });
+    if (!res.ok || !/html/i.test(res.headers.get('content-type') || '')) return null;
+    const html = (await res.text()).slice(0, 400000);
+    const m = /<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)/i.exec(html) || /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+    const title = m && decodeEntities(m[1]).replace(/\s+/g, ' ').trim().slice(0, 200);
+    return title || null;
+  } catch {
+    return null;
+  }
 });
 
 // Native context menu; resolves with the clicked item's id (or null).
@@ -528,7 +586,7 @@ function createWindow(notePath) {
     show: false,
     title: 'VibeNote',
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#18191d' : '#ffffff',
+    backgroundColor: currentTheme?.colors?.['editor.background']?.slice(0, 7) || (nativeTheme.shouldUseDarkColors ? '#18191d' : '#ffffff'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -569,6 +627,7 @@ function buildMenu() {
     else if (cmd === 'new-note') createWindow();
   };
   const item = (label, cmd, accelerator) => ({ label, accelerator, click: send(cmd) });
+  const fmt = (label, cmd, accelerator) => ({ label, accelerator, registerAccelerator: false, click: send(cmd) });
   const template = [
     ...(isMac ? [{
       label: app.name,
@@ -604,6 +663,40 @@ function buildMenu() {
     },
     { role: 'editMenu' },
     {
+      label: 'Format',
+      // The editor handles these keys itself; the menu shows them and works by clicking.
+      submenu: [
+        fmt('Bold', 'fmt-bold', 'CmdOrCtrl+B'),
+        fmt('Italic', 'fmt-italic', 'CmdOrCtrl+I'),
+        fmt('Strikethrough', 'fmt-strike', 'CmdOrCtrl+Shift+X'),
+        fmt('Inline Code', 'fmt-code', 'CmdOrCtrl+E'),
+        fmt('Highlight', 'fmt-highlight', 'CmdOrCtrl+Shift+H'),
+        fmt('Link', 'fmt-link', 'CmdOrCtrl+Alt+K'),
+        { type: 'separator' },
+        fmt('Toggle Checkbox', 'fmt-task', 'CmdOrCtrl+Enter'),
+        {
+          label: 'Heading',
+          submenu: [1, 2, 3, 4, 5, 6].map((n) => fmt(`Heading ${n}`, `fmt-h${n}`, `Ctrl+${n}`)).concat([fmt('Normal Text', 'fmt-h0', 'Ctrl+0')]),
+        },
+        { type: 'separator' },
+        {
+          label: 'Lines',
+          submenu: [
+            fmt('Move Line Up', 'line-up', 'Alt+Up'),
+            fmt('Move Line Down', 'line-down', 'Alt+Down'),
+            fmt('Duplicate Line', 'line-dup', 'Shift+Alt+Down'),
+            fmt('Delete Line', 'line-delete', 'CmdOrCtrl+Shift+K'),
+            fmt('Join Lines', 'line-join', 'Ctrl+J'),
+            fmt('Sort Lines', 'line-sort', 'F5'),
+            fmt('Sort Lines (Z→A)', 'line-sort-desc', 'Shift+F5'),
+            { type: 'separator' },
+            fmt('UPPER CASE', 'case-upper'),
+            fmt('lower case', 'case-lower'),
+          ],
+        },
+      ],
+    },
+    {
       label: 'Note',
       submenu: [
         item('Pin / Unpin', 'toggle-pin', 'CmdOrCtrl+Alt+P'),
@@ -629,6 +722,10 @@ function buildMenu() {
       submenu: [
         item('Command Palette…', 'palette', 'CmdOrCtrl+K'),
         item('Search Notes', 'search', 'CmdOrCtrl+Shift+F'),
+        item('Go to Heading…', 'outline', 'CmdOrCtrl+Shift+O'),
+        { type: 'separator' },
+        item('Back', 'nav-back', 'Ctrl+-'),
+        item('Forward', 'nav-forward', 'Ctrl+Shift+-'),
         { type: 'separator' },
         item('All Notes', 'go-all', 'CmdOrCtrl+Shift+A'),
         item('Inbox', 'go-inbox', 'CmdOrCtrl+Shift+I'),
@@ -669,7 +766,7 @@ app.on('before-quit', () => { quitting = true; });
 
 app.whenReady().then(async () => {
   loadConfig();
-  nativeTheme.themeSource = config.settings.theme;
+  applyTheme();
   if (!fs.existsSync(rootDir())) {
     await fsp.mkdir(path.join(rootDir(), 'Ideas'), { recursive: true });
     await fsp.writeFile(path.join(rootDir(), 'Welcome to VibeNote.md'), fs.readFileSync(path.join(__dirname, 'welcome.md'), 'utf8'));

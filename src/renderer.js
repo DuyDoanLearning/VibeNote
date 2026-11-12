@@ -2,6 +2,9 @@
 import { createEditor } from './editor.js';
 import { renderMarkdown, postProcess, setLinkResolver } from './markdown.js';
 import { parseQuery, matchQuery, fuzzy } from './search.js';
+import { applyTheme } from './theme.js';
+import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
+import { moveLineUp, moveLineDown, copyLineDown, deleteLine } from '@codemirror/commands';
 
 const api = window.vibe;
 const $ = (s, r = document) => r.querySelector(s);
@@ -56,6 +59,9 @@ const S = {
   mode: load('mode', 'split'),
   expanded: new Set(load('expanded', [])),
   settings: {},
+  back: [], // navigation history (paths)
+  forward: [],
+  navigating: false,
 };
 
 const nameOf = (p) => p.slice(p.lastIndexOf('/') + 1).replace(/\.md$/i, '');
@@ -97,6 +103,14 @@ const editor = createEditor({
     if (n && p !== S.current) editor.insert(pos, `[[${n.title}]]`);
   },
   onLinkClick: openByTitle,
+  async onPasteUrl(url, pos) {
+    if (!S.settings.linkTitles) return;
+    const notePath = S.current;
+    const title = await api.linkTitle(url);
+    if (!title || S.current !== notePath) return;
+    const safe = title.replace(/([\[\]])/g, '\\$1');
+    editor.replaceNear(pos, url, `[${safe}](${url})`);
+  },
   getTitles: () => [...new Set(live().filter((n) => n.path !== S.current).map((n) => n.title))],
 });
 setLinkResolver((title) => !!findByTitle(title));
@@ -227,6 +241,11 @@ async function openNote(path) {
   await leaveCurrent();
   const n = S.notes.find((x) => x.path === path);
   if (!n) return;
+  if (!S.navigating && S.current) {
+    S.back.push(S.current);
+    if (S.back.length > 100) S.back.shift();
+    S.forward = [];
+  }
   let data;
   try { data = await api.read(path); } catch { return refresh(); }
   Object.assign(n, { meta: data.meta, body: data.body, title: titleOf(data.body, n.name) });
@@ -752,6 +771,8 @@ function renderToolbar() {
   }
   sel.value = n ? n.notebook : '';
   sel.disabled = !n || n.trashed;
+  $('#back-btn').disabled = !S.back.length;
+  $('#fwd-btn').disabled = !S.forward.length;
   $('#pin-btn').classList.toggle('on', !!S.meta?.pinned);
   $('#pin-btn').title = S.meta?.pinned ? 'Unpin note (⌥⌘P)' : 'Pin note (⌥⌘P)';
   $$('#modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === S.mode));
@@ -804,6 +825,7 @@ async function renderPreview(force = false) {
     dir: dirOf(S.current),
     dark: isDark(),
     onTask: isTrashed() ? null : (i) => editor.toggleTask(i),
+    copyButtons: true,
   });
   if (seq !== previewSeq) return;
   const box = $('#preview');
@@ -868,6 +890,51 @@ function applySettings(s) {
   root.setProperty('--line-width', widths[s.lineWidth] || widths.medium);
   editor.applySettings(s);
   renderPreview();
+}
+
+function onThemeChanged(theme) {
+  applyTheme(theme);
+  renderPreview();
+}
+
+// ---------- navigation ----------
+async function navigate(dir) {
+  const from = dir < 0 ? S.back : S.forward;
+  const to = dir < 0 ? S.forward : S.back;
+  while (from.length) {
+    const p = from.pop();
+    const n = S.notes.find((x) => x.path === p);
+    if (!n) continue;
+    if (S.current) to.push(S.current);
+    S.navigating = true;
+    try {
+      if (!visibleNotes().includes(n)) setFilter({ type: 'all' });
+      await openNote(p);
+    } finally {
+      S.navigating = false;
+    }
+    break;
+  }
+  renderToolbar();
+}
+
+// Headings of the open note (outside code fences) for the outline.
+function headings() {
+  const out = [];
+  let fence = false;
+  editor.text().split('\n').forEach((line, i) => {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    if (fence) return;
+    const m = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (m) out.push({ level: m[1].length, text: m[2], line: i + 1, index: out.length });
+  });
+  return out;
+}
+
+function gotoHeading(h) {
+  if (S.mode !== 'preview') editor.gotoLine(h.line);
+  const els = $$('#preview h1, #preview h2, #preview h3, #preview h4, #preview h5, #preview h6');
+  els[h.index]?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 // ---------- menus ----------
@@ -982,7 +1049,7 @@ function closeOverlay() {
 
 function openPalette(initial = '') {
   const ov = overlay('palette-ov');
-  ov.innerHTML = '<div class="palette"><input spellcheck="false" placeholder="Jump to a note… or type > for commands"><ul></ul></div>';
+  ov.innerHTML = '<div class="palette"><input spellcheck="false" placeholder="Jump to a note…   > commands   # headings"><ul></ul></div>';
   const input = $('input', ov);
   const ul = $('ul', ov);
   let items = [];
@@ -992,6 +1059,8 @@ function openPalette(initial = '') {
     if (it.kind === 'note') {
       if (!visibleNotes().includes(it.n)) setFilter({ type: 'all' });
       openNote(it.n.path);
+    } else if (it.kind === 'heading') {
+      gotoHeading(it.h);
     } else {
       it.c.run();
     }
@@ -1001,6 +1070,11 @@ function openPalette(initial = '') {
     items.forEach((it, i) => {
       const li = el('li', i === sel ? 'sel' : '');
       if (it.kind === 'note') li.append(iconEl(it.n.meta.pinned ? ICON.pin : ICON.note), el('span', 'pl-title', it.n.title), el('span', 'pl-hint', it.n.notebook ? leafOf(it.n.notebook) : 'Inbox'));
+      else if (it.kind === 'heading') {
+        const t = el('span', 'pl-title', it.h.text);
+        t.style.paddingLeft = `${(it.h.level - 1) * 14}px`;
+        li.append(el('span', 'pl-hash', '#'.repeat(it.h.level)), t, el('span', 'pl-hint', `line ${it.h.line}`));
+      }
       else li.append(iconEl(ICON.cmd), el('span', 'pl-title', it.c.title), el('span', 'pl-hint kbd', it.c.key || ''));
       li.addEventListener('mousemove', () => { if (sel !== i) { sel = i; draw(); } });
       li.addEventListener('click', () => run(it));
@@ -1011,6 +1085,15 @@ function openPalette(initial = '') {
   };
   const update = () => {
     const raw = input.value;
+    if (raw.startsWith('#')) {
+      const q = raw.slice(1).trim();
+      items = headings()
+        .map((h) => ({ kind: 'heading', h, score: fuzzy(h.text, q) }))
+        .filter((x) => x.score >= 0);
+      if (q) items.sort((a, b) => b.score - a.score);
+      sel = 0;
+      return draw();
+    }
     const cmdOnly = raw.startsWith('>');
     const q = (cmdOnly ? raw.slice(1) : raw).trim();
     const cmds = COMMANDS.filter((c) => c.title && (!c.when || c.when()))
@@ -1037,14 +1120,35 @@ function openPalette(initial = '') {
   input.focus();
 }
 
-function openSettings() {
+async function openSettings() {
   const ov = overlay('modal-ov');
   const sizes = [12, 13, 14, 15, 16, 17, 18, 20, 22];
+  const themes = await api.themes();
+  const groups = new Map();
+  for (const t of themes) {
+    if (!groups.has(t.source)) groups.set(t.source, []);
+    groups.get(t.source).push(t);
+  }
+  const themeOptions = [...groups].map(([src, list]) => `<optgroup label="${esc(src)} themes">${
+    list.map((t) => `<option value="theme:${esc(t.key)}">${esc(t.label)}</option>`).join('')}</optgroup>`).join('');
   ov.innerHTML = `
     <div class="modal settings">
       <h2>Settings</h2>
-      <label class="row"><span>Appearance</span><select data-k="theme">
-        <option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+      <div class="group-label">Appearance</div>
+      <label class="row"><span>Theme</span><select data-k="theme" class="theme-select">
+        <optgroup label="VibeNote">
+          <option value="system">Match system (light / dark)</option>
+          <option value="light">VibeNote Light</option>
+          <option value="dark">VibeNote Dark</option>
+        </optgroup>
+        <optgroup label="Visual Studio Code">
+          <option value="vscode">Same as VS Code (follows changes)</option>
+        </optgroup>
+        ${themeOptions}
+      </select></label>
+      <div class="row"><span class="sub">Use any VS Code colour theme — installed ones appear above automatically.</span>
+        <button class="btn" data-act="import">Import theme…</button></div>
+      <div class="group-label">Editor</div>
       <label class="row"><span>Editor font</span><select data-k="editorFont">
         <option value="mono">Monospace</option><option value="sans">Sans-serif</option><option value="serif">Serif</option></select></label>
       <label class="row"><span>Font size</span><select data-k="fontSize" data-num>
@@ -1054,6 +1158,9 @@ function openSettings() {
       <label class="row"><span>Line numbers</span><input type="checkbox" data-k="lineNumbers"></label>
       <label class="row"><span>Vim key bindings</span><input type="checkbox" data-k="vim"></label>
       <label class="row"><span>Spell check</span><input type="checkbox" data-k="spellcheck"></label>
+      <label class="row"><span>Fetch page titles when pasting links</span><input type="checkbox" data-k="linkTitles"></label>
+      <label class="row"><span>Sync preview scrolling</span><input type="checkbox" data-k="scrollSync"></label>
+      <div class="group-label">Storage</div>
       <div class="row"><span>Notes folder</span><button class="btn" data-act="folder">Change…</button></div>
       <p class="path">${esc(S.root)}</p>
       <div class="actions"><button class="btn primary" data-act="close">Done</button></div>
@@ -1068,6 +1175,19 @@ function openSettings() {
     });
   }
   $('[data-act=folder]', ov).addEventListener('click', () => { closeOverlay(); chooseFolder(); });
+  $('[data-act=import]', ov).addEventListener('click', async () => {
+    try {
+      const before = new Set(themes.map((t) => t.key));
+      const list = await api.importTheme();
+      if (!list) return;
+      const added = list.find((t) => !before.has(t.key));
+      if (added) await api.setSettings({ theme: `theme:${added.key}` });
+      toast(added ? `Imported “${added.label}”` : 'Theme imported');
+      openSettings();
+    } catch (e) {
+      toast('Import failed: ' + e.message);
+    }
+  });
   $('[data-act=close]', ov).addEventListener('click', closeOverlay);
   $('[data-act=close]', ov).focus();
 }
@@ -1160,6 +1280,29 @@ const COMMANDS = [
   { id: 'sort-created', title: 'Sort by Date Created', run: () => setSort('created') },
   { id: 'sort-title', title: 'Sort by Title', run: () => setSort('title') },
   { id: 'settings', title: 'Settings', key: '⌘,', run: openSettings },
+  { id: 'outline', title: 'Go to Heading', key: '⇧⌘O', when: () => !!S.current, run: () => openPalette('#') },
+  { id: 'nav-back', title: 'Go Back', key: '⌃-', run: () => navigate(-1) },
+  { id: 'nav-forward', title: 'Go Forward', key: '⌃⇧-', run: () => navigate(1) },
+  ...[
+    ['fmt-bold', 'Bold', '⌘B', toggleWrap('**')],
+    ['fmt-italic', 'Italic', '⌘I', toggleWrap('*')],
+    ['fmt-strike', 'Strikethrough', '⇧⌘X', toggleWrap('~~')],
+    ['fmt-code', 'Inline Code', '⌘E', toggleWrap('`')],
+    ['fmt-highlight', 'Highlight', '⇧⌘H', toggleWrap('==')],
+    ['fmt-link', 'Insert Link', '⌥⌘K', insertLink],
+    ['fmt-task', 'Toggle Checkbox', '⌘↵', toggleTask],
+    ...[1, 2, 3, 4, 5, 6].map((n) => [`fmt-h${n}`, `Heading ${n}`, `⌃${n}`, setHeading(n)]),
+    ['fmt-h0', 'Normal Text', '⌃0', setHeading(0)],
+    ['line-up', 'Move Line Up', '⌥↑', moveLineUp],
+    ['line-down', 'Move Line Down', '⌥↓', moveLineDown],
+    ['line-dup', 'Duplicate Line', '⇧⌥↓', copyLineDown],
+    ['line-delete', 'Delete Line', '⇧⌘K', deleteLine],
+    ['line-join', 'Join Lines', '⌃J', joinLines],
+    ['line-sort', 'Sort Lines', 'F5', sortLines(false)],
+    ['line-sort-desc', 'Sort Lines (Z→A)', '⇧F5', sortLines(true)],
+    ['case-upper', 'Transform to UPPER CASE', '', changeCase(true)],
+    ['case-lower', 'Transform to lower case', '', changeCase(false)],
+  ].map(([id, title, key, cmd]) => ({ id, title, key, when: needNote, run: () => editor.run(cmd) })),
   { id: 'choose-folder', title: 'Change Notes Folder', run: chooseFolder },
 ];
 
@@ -1184,6 +1327,17 @@ function bindUI() {
   $('#empty-new').addEventListener('click', () => newNote());
   $('#sort-btn').addEventListener('click', sortMenu);
   $('#more-btn').addEventListener('click', moreMenu);
+  $('#back-btn').addEventListener('click', () => navigate(-1));
+  $('#fwd-btn').addEventListener('click', () => navigate(1));
+
+  // Keep the preview roughly in step with the editor while scrolling (split view)
+  const scroller = editor.view.scrollDOM;
+  scroller.addEventListener('scroll', () => {
+    if (!S.settings.scrollSync || S.mode !== 'split') return;
+    const max = scroller.scrollHeight - scroller.clientHeight;
+    const box = $('#preview');
+    box.scrollTop = max > 0 ? (scroller.scrollTop / max) * (box.scrollHeight - box.clientHeight) : 0;
+  }, { passive: true });
   $('#pin-btn').addEventListener('click', () => runCommand('toggle-pin'));
   $('#restore-btn').addEventListener('click', () => restoreNote(S.current));
   $('#delete-btn').addEventListener('click', () => deleteForever(S.current));
@@ -1204,7 +1358,11 @@ function bindUI() {
     if (!a) return;
     const href = a.getAttribute('href') || '';
     if (href.startsWith('#note:')) { e.preventDefault(); openByTitle(decodeURIComponent(href.slice(6))); }
-    else if (href.startsWith('#')) e.preventDefault();
+    else if (href.startsWith('#')) {
+      e.preventDefault();
+      const target = href.length > 1 && $('#preview').querySelector(`[id="${CSS.escape(decodeURIComponent(href.slice(1)))}"]`);
+      target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
   });
 
   const search = $('#search');
@@ -1235,6 +1393,7 @@ function bindUI() {
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => renderPreview());
   api.onChanged(() => refresh());
   api.onSettings(applySettings);
+  api.onTheme(onThemeChanged);
   api.onCommand(async (cmd) => {
     if (cmd === 'flush') {
       await leaveCurrent();
@@ -1249,6 +1408,7 @@ function bindUI() {
   if (SINGLE) document.body.classList.add('single');
   bindUI();
   applySettings(await api.getSettings());
+  applyTheme(await api.currentTheme());
   setMode(S.mode);
   await refresh();
   const target = SINGLE || load('last', null);

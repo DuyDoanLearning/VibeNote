@@ -3,6 +3,7 @@ import { Marked } from 'marked';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/common';
 import katex from 'katex';
+import markedFootnote from 'marked-footnote';
 
 let linkExists = () => true;
 export function setLinkResolver(fn) { linkExists = fn; }
@@ -18,8 +19,19 @@ function tex(src, displayMode) {
 }
 
 const marked = new Marked({ gfm: true });
+marked.use(markedFootnote());
 marked.use({
   extensions: [
+    {
+      name: 'highlight',
+      level: 'inline',
+      start: (src) => { const i = src.indexOf('=='); return i < 0 ? undefined : i; },
+      tokenizer(src) {
+        const m = /^==(?=\S)([^=\n]*?\S)==/.exec(src);
+        if (m) return { type: 'highlight', raw: m[0], tokens: this.lexer.inlineTokens(m[1]) };
+      },
+      renderer(tok) { return `<mark>${this.parser.parseInline(tok.tokens)}</mark>`; },
+    },
     {
       name: 'wikilink',
       level: 'inline',
@@ -95,7 +107,59 @@ async function renderMermaid(code, dark) {
 }
 
 // Enhance rendered HTML in place. dir = folder of the note (for relative images).
-export async function postProcess(root, { dir, dark, onTask }) {
+const ALERT_ICONS = { note: 'ℹ️', tip: '💡', important: '❗', warning: '⚠️', caution: '🛑' };
+
+export async function postProcess(root, { dir, dark, onTask, copyButtons = false }) {
+  // > [!NOTE] … → callout box
+  root.querySelectorAll('blockquote').forEach((bq) => {
+    const p = bq.firstElementChild;
+    if (!p || p.tagName !== 'P') return;
+    const m = /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/i.exec(p.textContent);
+    if (!m) return;
+    const kind = m[1].toLowerCase();
+    // strip the marker from the first text node
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+    const first = walker.nextNode();
+    if (first) first.textContent = first.textContent.replace(/^\s*\[![a-z]+\]\s*/i, '');
+    if (!p.textContent.trim() && !p.querySelector('img')) p.remove();
+    bq.classList.add('alert', `alert-${kind}`);
+    const title = document.createElement('div');
+    title.className = 'alert-title';
+    title.textContent = `${ALERT_ICONS[kind]} ${kind[0].toUpperCase()}${kind.slice(1)}`;
+    bq.prepend(title);
+  });
+  // ![w:200](…) / ![photo width:50%](…) → sized image
+  root.querySelectorAll('img[alt]').forEach((img) => {
+    let alt = img.getAttribute('alt');
+    const grab = (re, prop) => {
+      const m = re.exec(alt);
+      if (!m) return;
+      img.style[prop] = /%|px$/.test(m[1]) ? m[1] : `${m[1]}px`;
+      alt = alt.replace(m[0], '').trim();
+    };
+    grab(/\b(?:w|width):\s*(\d+(?:px|%)?)/i, 'width');
+    grab(/\b(?:h|height):\s*(\d+(?:px|%)?)/i, 'height');
+    img.setAttribute('alt', alt);
+  });
+  if (copyButtons) {
+    root.querySelectorAll('pre > code').forEach((code) => {
+      if (code.classList.contains('language-mermaid')) return;
+      const pre = code.parentElement;
+      const wrap = document.createElement('div');
+      wrap.className = 'code-wrap';
+      pre.replaceWith(wrap);
+      wrap.append(pre);
+      const btn = document.createElement('button');
+      btn.className = 'copy-btn';
+      btn.textContent = 'Copy';
+      btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(code.textContent);
+        btn.textContent = 'Copied';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
+      });
+      wrap.append(btn);
+    });
+  }
   root.querySelectorAll('pre code').forEach((c) => {
     if (c.classList.contains('language-mermaid')) return;
     try { hljs.highlightElement(c); } catch {}

@@ -28,8 +28,13 @@ contextBridge.exposeInMainWorld('vibe', {
   getSettings: invoke('settings:get'),
   setSettings: invoke('settings:set'),
   popup: invoke('menu:popup'),
+  themes: invoke('themes:list'),
+  currentTheme: invoke('theme:current'),
+  importTheme: invoke('themes:import'),
+  linkTitle: invoke('link:title'),
   flushed: () => ipcRenderer.send('app:flushed'),
   onChanged: (cb) => ipcRenderer.on('vault:changed', () => cb()),
   onCommand: (cb) => ipcRenderer.on('command', (_e, cmd) => cb(cmd)),
   onSettings: (cb) => ipcRenderer.on('settings:changed', (_e, s) => cb(s)),
+  onTheme: (cb) => ipcRenderer.on('theme:changed', (_e, t) => cb(t)),
 });
