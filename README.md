@@ -1,6 +1,6 @@
 # VibeNote
 
-A Markdown note-taking app for macOS, built with Electron. Inspired by Inkdrop, but everything is stored as **plain files** — notes are `.md` files, notebooks are folders — so they stay readable, greppable and easy to back up or sync.
+A Markdown note-taking app for macOS, built with Electron. Everything is stored as **plain files** — notes are `.md` files, notebooks are folders — so they stay readable, greppable and easy to back up or sync.
 
 ## Features
 

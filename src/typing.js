@@ -1,4 +1,4 @@
-// Inkdrop-style typing helpers for the Markdown editor.
+// Typing helpers for the Markdown editor: formatting, lists, slash commands, emoji, line tools.
 import { EditorSelection, Prec } from '@codemirror/state';
 import { keymap, Decoration, ViewPlugin } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';

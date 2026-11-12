@@ -1,6 +1,6 @@
 # VibeNote — notes for Claude
 
-Markdown note-taking app (Electron, macOS), an Inkdrop-inspired app built for the repo owner's own use. See README.md for features, data layout and file map.
+Markdown note-taking app (Electron, macOS), built for the repo owner's own use. See README.md for features, data layout and file map.
 
 ## Principles
 - **Notes are plain files.** `.md` files in a folder, notebooks = folders, metadata = YAML front matter (`tags`, `status`, `pinned`, `created`; unknown keys are preserved in `meta.extra`). Never introduce a database or hidden per-note state that breaks this — the notes folder must stay syncable between Macs.
@@ -26,6 +26,6 @@ Markdown note-taking app (Electron, macOS), an Inkdrop-inspired app built for th
 - Commit messages: imperative summary line; end with the Co-Authored-By trailer.
 
 ## Open ideas / not built yet
-- AI: inline assistant (BYOK, key in Keychain via `safeStorage`), next-edit ghost text, and an MCP server exposing notes — see Inkdrop docs for the reference design. Waiting on the owner's choice of provider.
+- AI: inline assistant (BYOK, key in Keychain via `safeStorage`), next-edit ghost text, and an MCP server exposing notes. Waiting on the owner's choice of provider.
 - Sync between Macs (owner wants it later; Mac-only, no mobile). Options: notes folder in iCloud Drive, or built-in git/server sync with conflict handling.
 - Floating selection toolbar, ordered-list auto-renumbering, `.tmTheme` theme support.
