@@ -393,6 +393,21 @@ async function chooseFolder() {
   if (first) openNote(first.path);
 }
 
+async function insertImages() {
+  if (!S.current || isTrashed()) return;
+  const state = editor.view.state;
+  const pos = state.selection.main.head;
+  try {
+    const list = await api.pickImages(S.current);
+    if (!list.length) return;
+    const atLineStart = pos === state.doc.lineAt(pos).from;
+    const text = (atLineStart ? '' : '\n') + list.map((i) => `![${i.alt.replace(/[[\]]/g, '')}](${i.rel})`).join('\n') + '\n';
+    editor.insert(Math.min(pos, editor.view.state.doc.length), text);
+  } catch (e) {
+    toast('Could not add image: ' + e.message);
+  }
+}
+
 async function attachFiles(files, pos) {
   if (!S.current || isTrashed()) return;
   let text = '';
@@ -1264,6 +1279,7 @@ const COMMANDS = [
     run: () => { S.meta.status = k; metaChanged(); },
   })),
   { id: 'status-none', title: 'Clear Status', key: '⌥⌘0', when: needNote, run: () => { S.meta.status = ''; metaChanged(); } },
+  { id: 'insert-image', title: 'Insert Image…', key: '⇧⌘U', when: needNote, run: insertImages },
   { id: 'copy-link', title: 'Copy Link to Note', key: '⌥⌘L', when: () => !!S.current, run: () => copyLink() },
   { id: 'history', title: 'Version History', key: '⌥⌘Y', when: needNote, run: openHistory },
   { id: 'open-window', title: 'Open Note in New Window', key: '⌥⌘O', when: () => !!S.current && !SINGLE, run: async () => { await save(); api.openWindow(S.current); } },
@@ -1333,6 +1349,8 @@ function bindUI() {
   $('#sort-btn').addEventListener('click', sortMenu);
   $('#more-btn').addEventListener('click', moreMenu);
   $('#back-btn').addEventListener('click', () => navigate(-1));
+  $('#image-btn').addEventListener('click', insertImages);
+  window.addEventListener('vibe:insert-image', insertImages);
   $('#fwd-btn').addEventListener('click', () => navigate(1));
 
   // Keep the preview roughly in step with the editor while scrolling (split view)

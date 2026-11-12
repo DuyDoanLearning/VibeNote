@@ -268,7 +268,7 @@ const SLASH = [
   ['Mermaid diagram', 'Flowchart', '```mermaid\ngraph LR\n  A[¦Start] --> B[End]\n```'],
   ['Link to note', '[[…]]', '[[¦'],
   ['Link', '[text](url)', '[¦](url)'],
-  ['Image', '![alt](path)', '![¦](path)'],
+  ['Image', 'Choose a picture…', '@image'],
   ['Highlight', '==text==', '==¦=='],
   ['Footnote', '[^1]', '[^1]¦\n\n[^1]: '],
   ['Date', 'Today', () => today() + '¦'],
@@ -277,6 +277,11 @@ const SLASH = [
 ];
 
 function applyTemplate(view, from, to, tpl) {
+  if (tpl === '@image') {
+    view.dispatch({ changes: { from, to, insert: '' }, userEvent: 'input.complete' });
+    window.dispatchEvent(new CustomEvent('vibe:insert-image'));
+    return;
+  }
   let text = typeof tpl === 'function' ? tpl() : tpl;
   const at = text.indexOf('¦');
   text = text.replace('¦', '');

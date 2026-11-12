@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('vibe', {
   emptyTrash: invoke('trash:empty'),
   reveal: invoke('note:reveal'),
   attach: invoke('note:attach'),
+  pickImages: invoke('note:pick-images'),
   history: invoke('note:history'),
   historyRead: invoke('note:history-read'),
   exportNote: invoke('note:export'),

@@ -15,6 +15,7 @@ const fsp = fs.promises;
 const os = require('os');
 const { pathToFileURL } = require('url');
 const themes = require('./themes');
+const { execFile } = require('child_process');
 
 const isMac = process.platform === 'darwin';
 const TRASH = '.trash';
@@ -409,17 +410,57 @@ ipcMain.handle('trash:empty', async () => {
 
 ipcMain.handle('note:reveal', (_e, p) => shell.showItemInFolder(inRoot(p)));
 
+function assetName(ext) {
+  const d = new Date();
+  const two = (n) => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`;
+  return `image-${stamp}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+}
+
+// HEIC/HEIF (iPhone photos) can't be shown by Chromium — convert to JPEG with macOS's sips.
+const toJpeg = (src, dest) => new Promise((resolve, reject) => {
+  execFile('/usr/bin/sips', ['-s', 'format', 'jpeg', src, '--out', dest], (err) => (err ? reject(err) : resolve()));
+});
+
 ipcMain.handle('note:attach', async (_e, p, name, mime, bytes) => {
   const file = inRoot(p);
   const extFromMime = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg', 'image/heic': 'heic' };
-  let ext = (path.extname(name || '').slice(1) || extFromMime[mime] || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const d = new Date();
-  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`;
-  const fname = `image-${stamp}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+  const ext = (path.extname(name || '').slice(1) || extFromMime[mime] || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
   const dir = path.join(path.dirname(file), ASSETS);
   await fsp.mkdir(dir, { recursive: true });
+  if (/^hei[cf]$/.test(ext)) {
+    const tmp = path.join(app.getPath('temp'), assetName(ext));
+    await fsp.writeFile(tmp, Buffer.from(bytes));
+    const fname = assetName('jpg');
+    try { await toJpeg(tmp, path.join(dir, fname)); } finally { fsp.unlink(tmp).catch(() => {}); }
+    return `${ASSETS}/${fname}`;
+  }
+  const fname = assetName(ext);
   await fsp.writeFile(path.join(dir, fname), Buffer.from(bytes));
   return `${ASSETS}/${fname}`;
+});
+
+// "Insert Image…": pick files, copy them into the note's .assets folder.
+ipcMain.handle('note:pick-images', async (e, p) => {
+  const file = inRoot(p);
+  const r = await dialog.showOpenDialog(winOf(e), {
+    title: 'Insert image',
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'bmp', 'heic', 'heif'] }],
+  });
+  if (r.canceled) return [];
+  const dir = path.join(path.dirname(file), ASSETS);
+  await fsp.mkdir(dir, { recursive: true });
+  const out = [];
+  for (const src of r.filePaths) {
+    const ext = path.extname(src).slice(1).toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+    const heic = /^hei[cf]$/.test(ext);
+    const fname = assetName(heic ? 'jpg' : ext);
+    if (heic) await toJpeg(src, path.join(dir, fname));
+    else await fsp.copyFile(src, path.join(dir, fname));
+    out.push({ rel: `${ASSETS}/${fname}`, alt: path.basename(src, path.extname(src)) });
+  }
+  return out;
 });
 
 ipcMain.handle('note:history', async (_e, p) => {
@@ -677,6 +718,7 @@ function buildMenu() {
         fmt('Inline Code', 'fmt-code', 'CmdOrCtrl+E'),
         fmt('Highlight', 'fmt-highlight', 'CmdOrCtrl+Shift+H'),
         fmt('Link', 'fmt-link', 'CmdOrCtrl+Alt+K'),
+        item('Insert Image…', 'insert-image', 'CmdOrCtrl+Shift+U'),
         { type: 'separator' },
         fmt('Toggle Checkbox', 'fmt-task', 'CmdOrCtrl+Enter'),
         {
