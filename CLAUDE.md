@@ -9,6 +9,20 @@ Markdown note-taking app (Electron, macOS), built for the repo owner's own use. 
 - A note's first line is its title **and** its file name: `note:save` renames the file to match.
 - UI colours are CSS variables (`--bg`, `--text`, `--accent`, `--syn-*`, `--md-*`, `--list-*`). Themes (built-in or VS Code) only set variables; the editor HighlightStyle and highlight.js CSS read them.
 
+## Branches / releases
+- `main` + tag `v1.0-stable` = the stable markdown app the owner relies on. Keep it stable.
+- `agent` = the experimental Claude panel (spec: the owner's note "VibeNote Dev/VibeNote Agent"). Experimental work goes here.
+- `scripts/install-version.sh <ref>` builds and installs any version; it is the owner's rollback path.
+
+## Claude panel (agent branch)
+- `src-main/agent.js` uses `@anthropic-ai/claude-agent-sdk` with `pathToClaudeCodeExecutable` = the user's installed `claude`, so it runs on their Claude login (ANTHROPIC_API_KEY is stripped from the child env on purpose). Owner's decision: internal use only; switch to API-key auth before distributing.
+- It is bundled by esbuild into `dist/agent.mjs` (the SDK's 300 MB platform binary is not shipped) and imported lazily by `main.js`.
+- Login-shell env is read once (`zsh -ilc env`) because GUI apps don't get the user's PATH.
+- One chat per project (top-level notebook) in streaming-input mode; transcripts in `userData/agent-chats/`. Projects map notebook → code folder in `config.projects` (machine-specific, not in the notes folder).
+- `canUseTool` → IPC → Allow/Deny cards in the renderer; AskUserQuestion answers go back as `updatedInput.answers`; ExitPlanMode shows the plan with Approve.
+- The system prompt append (`systemPromptFor` in main.js) defines the note-driven conventions: plans as checklists, tick steps, Change log note per commit, Codebase map.
+- Testing the agent spends the owner's Claude usage: keep end-to-end tests tiny, and use a scratch repo + temp notes folder.
+
 ## Commands
 - `npm start` — build + run (dev)
 - `npm run build` — esbuild bundles `src/renderer.js` → `dist/renderer.js`, copies KaTeX + Mermaid into `dist/`
@@ -26,6 +40,6 @@ Markdown note-taking app (Electron, macOS), built for the repo owner's own use. 
 - Commit messages: imperative summary line; end with the Co-Authored-By trailer.
 
 ## Open ideas / not built yet
-- AI: inline assistant (BYOK, key in Keychain via `safeStorage`), next-edit ghost text, and an MCP server exposing notes. Waiting on the owner's choice of provider.
+- Agent phases 2–4 (see the spec note): Plan/Build buttons and templates, automatic change-log/commit links, codebase map, explain-as-notes, diff viewer, other agents (Codex). Smaller AI ideas: inline assistant, next-edit ghost text, an MCP server exposing notes.
 - Sync between Macs (owner wants it later; Mac-only, no mobile). Options: notes folder in iCloud Drive, or built-in git/server sync with conflict handling.
 - Floating selection toolbar, ordered-list auto-renumbering, `.tmTheme` theme support.

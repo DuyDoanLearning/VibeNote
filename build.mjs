@@ -16,3 +16,17 @@ await build({
   outfile: 'dist/renderer.js',
   logLevel: 'info',
 });
+
+// Main-process agent host: the Claude Agent SDK bundled in (we use the user's installed Claude Code binary,
+// so the SDK's own 300 MB platform binary is not shipped).
+await build({
+  entryPoints: ['src-main/agent.js'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node22',
+  outfile: 'dist/agent.mjs',
+  external: ['electron'],
+  banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
+  logLevel: 'info',
+});

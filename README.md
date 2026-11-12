@@ -17,6 +17,27 @@ A Markdown note-taking app for macOS, built with Electron. Everything is stored 
 - Themes: built-in light/dark, **any VS Code colour theme** installed on the machine, “Same as VS Code”, or import `.json` / `.vsix`
 - Vim key bindings, line numbers, spell check, font / width settings
 
+## Claude panel (experimental, `agent` branch)
+
+Press **⌘J** to open a chat with Claude next to your notes. Link a notebook to a code folder (panel → ⋯ → *Link a Code Folder*) and Claude can plan in your notes, edit code, run commands, commit, and keep a plain-language **Change log** note. Every risky step shows an **Allow / Deny** card first.
+
+It runs on **your installed [Claude Code](https://claude.com/claude-code)** and its existing login (via the Claude Agent SDK), so install Claude Code and run `claude` once to sign in. This is meant for personal use; an app distributed to others should use API-key authentication instead.
+
+### Versions and rollback
+
+| Version | Where |
+|---|---|
+| Stable markdown app | tag `v1.0-stable` (branch `main`) |
+| Experimental (Claude panel) | branch `agent` |
+
+Install any version into /Applications (notes and settings are not touched):
+
+```sh
+scripts/install-version.sh              # back to the stable release
+scripts/install-version.sh agent        # the experimental build
+scripts/install-version.sh <commit>     # anything else
+```
+
 ## Getting started on a new machine
 
 Requirements: macOS, [Node.js](https://nodejs.org) 20+ and git.
@@ -64,9 +85,12 @@ The notes folder is self-contained, so it can be synced between Macs (iCloud Dri
 | `src/markdown.js` | Markdown → HTML (marked + wiki links, math, highlight, footnotes, callouts, Mermaid) |
 | `src/theme.js` | Maps a VS Code theme to VibeNote's CSS variables |
 | `src/search.js` | Search filters and fuzzy matching |
+| `src/agent-panel.js` | The Claude chat panel (messages, tool activity, Allow/Deny cards, questions, plans) |
+| `src-main/agent.js` | Agent host: Claude Agent SDK driving the installed Claude Code (bundled to `dist/agent.mjs`) |
 | `styles.css` / `markdown.css` | App styles / preview + export styles |
 | `welcome.md` | Note created on first run |
 | `scripts/smoke-test.js` | Launches the app against a throwaway profile and takes screenshots |
+| `scripts/install-version.sh` | Builds a given git version and installs it into /Applications (rollback) |
 
 ## Scripts
 

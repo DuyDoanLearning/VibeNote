@@ -31,10 +31,14 @@ const DEFAULT_SETTINGS = {
   spellcheck: false,
   linkTitles: true,
   scrollSync: true,
+  agentModel: '',          // '' = Claude Code's default
+  agentMode: 'default',    // default | acceptEdits | plan
+  agentClaudePath: '',     // '' = find the installed `claude` automatically
 };
 
 const configPath = () => path.join(app.getPath('userData'), 'config.json');
-const config = { root: path.join(os.homedir(), 'Documents', 'VibeNotes'), settings: { ...DEFAULT_SETTINGS } };
+// projects: { [top-level notebook name]: absolute path of the linked code folder } (machine-specific, so not in the notes folder)
+const config = { root: path.join(os.homedir(), 'Documents', 'VibeNotes'), settings: { ...DEFAULT_SETTINGS }, projects: {} };
 
 let watcher = null;
 let changeTimer = null;
@@ -45,6 +49,7 @@ function loadConfig() {
   try {
     const c = JSON.parse(fs.readFileSync(configPath(), 'utf8'));
     if (c.root) config.root = c.root;
+    if (c.projects && typeof c.projects === 'object') config.projects = c.projects;
     config.settings = { ...DEFAULT_SETTINGS, ...(c.settings || {}) };
   } catch {}
 }
@@ -616,6 +621,189 @@ ipcMain.handle('menu:popup', (e, items) => new Promise((resolve) => {
   });
 }));
 
+// ---------- agent (Claude via the user's installed Claude Code) ----------
+// A chat is keyed by project (top-level notebook) — or '' for "notes only" when the notebook has no linked code folder.
+let agentMod = null;
+const loadAgent = async () => (agentMod ||= await import(pathToFileURL(path.join(__dirname, 'dist', 'agent.mjs')).href));
+const chats = new Map(); // key -> { chat, wc, items, sessionId, pending }
+const permissionWaits = new Map(); // id -> resolve
+let permSeq = 0;
+const chatsDir = () => path.join(app.getPath('userData'), 'agent-chats');
+const chatFile = (key) => path.join(chatsDir(), `${key ? encodeURIComponent(key) : '_notes'}.json`);
+
+function readChat(key) {
+  try { return JSON.parse(fs.readFileSync(chatFile(key), 'utf8')); } catch { return { sessionId: null, items: [] }; }
+}
+function writeChat(key, data) {
+  fs.mkdirSync(chatsDir(), { recursive: true });
+  fs.writeFileSync(chatFile(key), JSON.stringify({ sessionId: data.sessionId, items: data.items.slice(-400) }, null, 1));
+}
+
+function projectFor(notebook) {
+  const key = String(notebook || '').split('/')[0];
+  const repo = key && config.projects[key];
+  return repo && fs.existsSync(repo) ? { key, repo } : { key: '', repo: null, notebook: key };
+}
+
+function systemPromptFor(project) {
+  const root = rootDir();
+  const lines = [
+    'You are running inside VibeNote, the user\'s Markdown notes app, as their writing and coding assistant. The user reads your replies in a narrow chat panel: keep them short and plain-spoken.',
+    `- The user's notes are plain Markdown files in ${root}. Notebooks are folders. A note's title is its file name (an optional "title:" in the YAML front matter overrides it). Front matter may also hold tags, status (active/onhold/completed/dropped) and pinned — keep it intact.`,
+    '- You can read and edit notes directly with your file tools; the user sees your edits appear live in the editor.',
+  ];
+  if (project.repo) {
+    const nb = path.join(root, project.key);
+    lines.push(
+      `- Current project: notebook "${project.key}" (${nb}), linked to the code repository ${project.repo} (your working directory).`,
+      'Note-driven workflow:',
+      '- Spec notes say what the user wants. When asked to plan, write the plan into the note as a checklist of small steps ("- [ ] step") and stop for review — do not start coding until the user says so.',
+      '- When building, do one plan step at a time. When a step is done (and committed), tick its checkbox ("- [x]").',
+      `- After each commit, append an entry to "${path.join(nb, 'Change log.md')}" (create it if missing, newest first): date, short commit hash, what changed and why in plain language, files touched.`,
+      `- The user wants to keep understanding their code. Explain in plain, non-jargon language. When asked, keep "${path.join(nb, 'Codebase map.md')}" up to date: how the code is organised and what each part does.`,
+      '- Commit with clear messages. Never push, force-push or rewrite git history unless the user asks.',
+    );
+  }
+  return lines.join('\n');
+}
+
+function agentSend(wc, key, evt) {
+  if (wc && !wc.isDestroyed()) wc.send('agent:event', { key, evt });
+}
+
+// Keep a condensed transcript for display/resume.
+function record(state, evt) {
+  const items = state.items;
+  const last = items[items.length - 1];
+  switch (evt.kind) {
+    case 'init': state.sessionId = evt.sessionId; break;
+    case 'text':
+      if (last && last.kind === 'text' && last.streaming) { last.text = evt.text; delete last.streaming; } else items.push({ kind: 'text', text: evt.text });
+      break;
+    case 'tool': items.push({ kind: 'tool', id: evt.id, name: evt.name, input: evt.input }); break;
+    case 'tool_result': {
+      const t = items.find((i) => i.kind === 'tool' && i.id === evt.id);
+      if (t) { t.done = true; t.isError = evt.isError; t.result = evt.text.slice(0, 1500); }
+      break;
+    }
+    case 'result': items.push({ kind: 'result', isError: evt.isError, durationMs: evt.durationMs, turns: evt.turns }); writeChat(state.key, state); break;
+    case 'error': items.push({ kind: 'error', message: evt.message }); writeChat(state.key, state); break;
+    default: break;
+  }
+}
+
+async function ensureChat(wc, key, project) {
+  let state = chats.get(key);
+  if (state && !state.chat.closed) { state.wc = wc; return state; }
+  const saved = state || { key, ...readChat(key) };
+  const mod = await loadAgent();
+  const env = await mod.loginShellEnv();
+  const claudePath = mod.findClaude(env, config.settings.agentClaudePath);
+  if (!claudePath) throw new Error('Claude Code was not found. Install it (https://claude.com/claude-code) and run `claude` once to log in, or set its path in Settings.');
+  state = { key, wc, items: saved.items || [], sessionId: saved.sessionId || null };
+  state.chat = new mod.AgentChat({
+    cwd: project.repo || rootDir(),
+    additionalDirectories: project.repo ? [rootDir()] : [],
+    appendSystemPrompt: systemPromptFor(project),
+    model: config.settings.agentModel,
+    permissionMode: config.settings.agentMode,
+    resume: state.sessionId,
+    claudePath,
+    env,
+    onEvent: (evt) => {
+      record(state, evt);
+      agentSend(state.wc, key, evt);
+    },
+    askPermission: ({ tool, input, title, reason, suggestions, signal }) => new Promise((resolve) => {
+      const id = `p${++permSeq}`;
+      const finish = (decision) => {
+        permissionWaits.delete(id);
+        if (!decision || decision.behavior === 'deny') {
+          resolve({ behavior: 'deny', message: decision?.message || 'The user declined this action.' });
+        } else {
+          resolve(decision);
+        }
+      };
+      permissionWaits.set(id, { finish, input, suggestions });
+      signal?.addEventListener('abort', () => { if (permissionWaits.has(id)) { finish(null); agentSend(state.wc, key, { kind: 'permission_cancel', id }); } });
+      agentSend(state.wc, key, { kind: 'permission', id, tool, input, title, reason, canRemember: !!suggestions?.length });
+    }),
+  });
+  chats.set(key, state);
+  return state;
+}
+
+ipcMain.handle('agent:context', async (_e, notebook) => {
+  const project = projectFor(notebook);
+  const state = chats.get(project.key) || { key: project.key, ...readChat(project.key) };
+  let claudePath = null;
+  try {
+    const mod = await loadAgent();
+    claudePath = mod.findClaude(await mod.loginShellEnv(), config.settings.agentClaudePath);
+  } catch {}
+  return {
+    key: project.key,
+    notebook: project.key || project.notebook || '',
+    repo: project.repo,
+    claudePath,
+    busy: !!chats.get(project.key)?.chat?.busy,
+    items: state.items || [],
+    hasSession: !!state.sessionId,
+  };
+});
+
+ipcMain.handle('agent:link', async (e, notebook) => {
+  const key = String(notebook || '').split('/')[0];
+  if (!key) throw new Error('Open a note inside a notebook first — the notebook becomes the project.');
+  const r = await dialog.showOpenDialog(winOf(e), { title: `Link a code folder to “${key}”`, properties: ['openDirectory'] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  config.projects[key] = r.filePaths[0];
+  saveConfig();
+  const old = chats.get('');
+  if (old) { /* notes-only chat stays as is */ }
+  return r.filePaths[0];
+});
+
+ipcMain.handle('agent:unlink', (_e, key) => {
+  delete config.projects[key];
+  saveConfig();
+  const st = chats.get(key);
+  if (st) { st.chat.close(); chats.delete(key); }
+});
+
+ipcMain.handle('agent:send', async (e, { notebook, text, notePath, noteTitle }) => {
+  const project = projectFor(notebook);
+  const state = await ensureChat(e.sender, project.key, project);
+  const context = notePath
+    ? `<vibenote-context>\nThe user is viewing the note "${noteTitle}" — ${notePath}\n</vibenote-context>\n\n`
+    : '';
+  state.items.push({ kind: 'user', text });
+  state.chat.send(context + text);
+  return { key: project.key };
+});
+
+ipcMain.handle('agent:stop', async (_e, key) => { await chats.get(key)?.chat.interrupt(); });
+ipcMain.handle('agent:mode', async (_e, key, mode) => {
+  config.settings.agentMode = mode;
+  saveConfig();
+  await chats.get(key)?.chat.setMode(mode);
+});
+ipcMain.handle('agent:new', (_e, key) => {
+  const st = chats.get(key);
+  if (st) { st.chat.close(); chats.delete(key); }
+  writeChat(key, { sessionId: null, items: [] });
+});
+ipcMain.handle('agent:permission-reply', (_e, id, reply) => {
+  const w = permissionWaits.get(id);
+  if (!w) return;
+  if (reply.decision === 'deny') return w.finish({ behavior: 'deny', message: reply.message || 'The user declined this action.' });
+  const out = { behavior: 'allow', updatedInput: reply.answers ? { ...w.input, answers: reply.answers } : w.input };
+  if (reply.decision === 'always' && w.suggestions?.length) out.updatedPermissions = w.suggestions.map((s) => ({ ...s, destination: 'session' }));
+  w.finish(out);
+});
+
+app.on('before-quit', () => { for (const st of chats.values()) st.chat.close(); });
+
 ipcMain.on('app:flushed', (e) => {
   const w = winOf(e);
   if (w && w.flushDone) w.flushDone();
@@ -788,6 +976,7 @@ function buildMenu() {
         { type: 'separator' },
         item('Toggle Sidebar', 'toggle-sidebar', 'CmdOrCtrl+\\'),
         item('Focus Mode', 'focus-mode', 'CmdOrCtrl+Shift+Enter'),
+        item('Claude Panel', 'toggle-agent', 'CmdOrCtrl+J'),
         {
           label: 'Sort Notes By',
           submenu: [

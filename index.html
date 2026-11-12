@@ -81,6 +81,9 @@
             <button data-mode="split" title="Split (⌘2)">Split</button>
             <button data-mode="preview" title="Preview only (⌘3)">Preview</button>
           </div>
+          <button id="agent-btn" class="icon agent-toggle" title="Claude (⌘J)">
+            <svg viewBox="0 0 24 24"><path d="M12 3c.5 4.5 2.5 6.5 7 7-4.5.5-6.5 2.5-7 7-.5-4.5-2.5-6.5-7-7 4.5-.5 6.5-2.5 7-7z"/><path d="M19 15c.2 1.6.9 2.3 2.5 2.5-1.6.2-2.3.9-2.5 2.5-.2-1.6-.9-2.3-2.5-2.5 1.6-.2 2.3-.9 2.5-2.5z"/></svg>
+          </button>
           <button id="more-btn" class="icon" title="More">
             <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>
           </button>
@@ -123,6 +126,7 @@
       </div>
       <footer id="status"><span id="status-words"></span><span id="status-save"></span></footer>
     </main>
+    <aside id="agent"></aside>
   </div>
   <div id="overlay" hidden></div>
   <div id="toast"></div>

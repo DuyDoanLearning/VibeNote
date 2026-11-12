@@ -3,6 +3,7 @@ import { createEditor } from './editor.js';
 import { renderMarkdown, postProcess, setLinkResolver } from './markdown.js';
 import { parseQuery, matchQuery, fuzzy } from './search.js';
 import { applyTheme } from './theme.js';
+import { createAgentPanel } from './agent-panel.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
 import { moveLineUp, moveLineDown, copyLineDown, deleteLine } from '@codemirror/commands';
 
@@ -257,6 +258,7 @@ async function openNote(path) {
   updateStatus();
   setStatusSaved(true);
   updateTitle();
+  agentPanel.noteChanged();
 }
 
 function closeNote() {
@@ -1301,6 +1303,7 @@ const COMMANDS = [
   { id: 'sort-created', title: 'Sort by Date Created', run: () => setSort('created') },
   { id: 'sort-title', title: 'Sort by Title', run: () => setSort('title') },
   { id: 'settings', title: 'Settings', key: '⌘,', run: openSettings },
+  { id: 'toggle-agent', title: 'Toggle Claude Panel', key: '⌘J', run: () => agentPanel.toggle() },
   { id: 'outline', title: 'Go to Heading', key: '⇧⌘O', when: () => !!S.current, run: () => openPalette('#') },
   { id: 'nav-back', title: 'Go Back', key: '⌃-', run: () => navigate(-1) },
   { id: 'nav-forward', title: 'Go Forward', key: '⌃⇧-', run: () => navigate(1) },
@@ -1350,6 +1353,7 @@ function bindUI() {
   $('#more-btn').addEventListener('click', moreMenu);
   $('#back-btn').addEventListener('click', () => navigate(-1));
   $('#image-btn').addEventListener('click', insertImages);
+  $('#agent-btn').addEventListener('click', () => agentPanel.toggle());
   window.addEventListener('vibe:insert-image', insertImages);
   $('#fwd-btn').addEventListener('click', () => navigate(1));
 
@@ -1444,6 +1448,23 @@ function bindUI() {
   });
   window.addEventListener('blur', () => save());
 }
+
+// ---------- Claude panel ----------
+let refreshSoon = null;
+const agentPanel = createAgentPanel({
+  api,
+  getContext: () => {
+    const n = currentNote();
+    return {
+      notebook: n ? n.notebook : (S.filter.type === 'notebook' ? S.filter.name : ''),
+      notePath: n && !n.trashed ? n.path : null,
+      noteTitle: n ? n.title : null,
+    };
+  },
+  beforeSend: () => save(),
+  // Claude edits files directly; the folder watcher picks that up, this just makes it snappy.
+  onNoteMaybeChanged: () => { clearTimeout(refreshSoon); refreshSoon = setTimeout(refresh, 150); },
+});
 
 (async function start() {
   if (SINGLE) document.body.classList.add('single');
