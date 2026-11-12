@@ -75,12 +75,9 @@ const isTrashed = () => !!currentNote()?.trashed;
 const isDark = () => matchMedia('(prefers-color-scheme: dark)').matches;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-function titleOf(body, fallback) {
-  for (const line of body.split('\n')) {
-    const s = line.replace(/^#{1,6}\s+/, '').trim();
-    if (s) return s;
-  }
-  return fallback;
+function startsWithTitle(body, title) {
+  const first = body.split('\n').find((l) => l.trim()) || '';
+  return /^#\s/.test(first) && first.replace(/^#+\s+/, '').trim() === title;
 }
 
 function findByTitle(t) {
@@ -126,7 +123,6 @@ function onEdit() {
   const n = currentNote();
   if (n) {
     n.body = editor.text();
-    n.title = titleOf(n.body, n.name);
     n.mtime = Date.now();
   }
   setStatusSaved(false);
@@ -157,7 +153,7 @@ function save(forceSnapshot = false) {
     try {
       const to = await api.save(from, meta, body, forceSnapshot);
       const n = S.notes.find((x) => x.path === from);
-      if (n) Object.assign(n, { path: to, name: nameOf(to), mtime: Date.now(), title: titleOf(n.body, nameOf(to)) });
+      if (n) Object.assign(n, { path: to, name: nameOf(to), mtime: Date.now(), title: meta.title || 'Untitled' });
       if (S.current === from) S.current = to;
       if (S.fresh.delete(from)) S.fresh.add(to);
       if (!SINGLE) store('last', S.current);
@@ -197,7 +193,7 @@ async function refresh() {
         } else if (S.dirty) {
           cur.body = editor.text();
           cur.meta = S.meta;
-          cur.title = titleOf(cur.body, cur.name);
+          cur.title = S.meta.title || 'Untitled';
         } else {
           S.meta = cur.meta;
           if (cur.body !== editor.text()) editor.replaceDoc(cur.body);
@@ -223,7 +219,7 @@ async function leaveCurrent() {
   await save();
   const p = S.current;
   if (!p) return;
-  if (S.fresh.has(p) && editor.text().trim() === '') {
+  if (S.fresh.has(p) && editor.text().trim() === '' && ['', 'Untitled'].includes((S.meta?.title || '').trim())) {
     S.fresh.delete(p);
     S.notes = S.notes.filter((n) => n.path !== p);
     S.current = null;
@@ -248,7 +244,7 @@ async function openNote(path) {
   }
   let data;
   try { data = await api.read(path); } catch { return refresh(); }
-  Object.assign(n, { meta: data.meta, body: data.body, title: titleOf(data.body, n.name) });
+  Object.assign(n, { meta: data.meta, body: data.body, title: data.meta.title });
   S.current = path;
   S.currentId = n.id;
   S.meta = data.meta;
@@ -288,7 +284,8 @@ async function newNote(title) {
     if (f.type === 'tag') { S.meta.tags.push(f.name); metaChanged(); }
     if (f.type === 'status') { S.meta.status = f.name; metaChanged(); }
     if (S.mode === 'preview') setMode('split');
-    editor.view.focus();
+    if (typeof title === 'string') editor.view.focus();
+    else { const ti = $('#title-input'); ti.focus(); ti.select(); }
   } catch (e) {
     toast(e.message);
   }
@@ -532,10 +529,10 @@ function visibleNotes() {
 }
 
 function snippet(n) {
-  const lines = n.body.split('\n');
-  const start = lines.findIndex((l) => l.trim());
+  let lines = n.body.split('\n');
+  const first = lines.findIndex((l) => l.trim());
+  if (first >= 0 && /^#{1,6}\s/.test(lines[first]) && lines[first].replace(/^#+\s+/, '').trim() === n.title) lines = lines.slice(first + 1);
   return lines
-    .slice(start + 1)
     .join(' ')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
@@ -781,6 +778,9 @@ function renderToolbar() {
 function renderMeta() {
   const m = S.meta;
   if (!m) return;
+  const ti = $('#title-input');
+  if (document.activeElement !== ti) ti.value = m.title === 'Untitled' && S.fresh.has(S.current) ? '' : m.title || '';
+  ti.readOnly = isTrashed();
   const s = STATUS[m.status];
   $('#status-select').value = m.status || '';
   $('#status-pick .dot').style.background = s ? s.color : 'transparent';
@@ -820,7 +820,9 @@ async function renderPreview(force = false) {
   if ((S.mode === 'edit' && !force) || !S.current) return;
   const seq = ++previewSeq;
   const tmp = document.createElement('div');
-  tmp.innerHTML = renderMarkdown(editor.text());
+  const text = editor.text();
+  const title = currentNote()?.title || '';
+  tmp.innerHTML = (startsWithTitle(text, title) ? '' : `<h1 class="print-title">${esc(title)}</h1>`) + renderMarkdown(text);
   await postProcess(tmp, {
     dir: dirOf(S.current),
     dark: isDark(),
@@ -933,7 +935,7 @@ function headings() {
 
 function gotoHeading(h) {
   if (S.mode !== 'preview') editor.gotoLine(h.line);
-  const els = $$('#preview h1, #preview h2, #preview h3, #preview h4, #preview h5, #preview h6');
+  const els = $$('#preview :is(h1, h2, h3, h4, h5, h6):not(.print-title)');
   els[h.index]?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
@@ -1012,7 +1014,8 @@ async function exportNote(format) {
   if (!n) return;
   await save();
   const tmp = document.createElement('div');
-  tmp.innerHTML = renderMarkdown(editor.text());
+  const body = editor.text();
+  tmp.innerHTML = (startsWithTitle(body, n.title) ? '' : `<h1>${esc(n.title)}</h1>`) + renderMarkdown(body);
   await postProcess(tmp, { dir: dirOf(n.path), dark: false });
   try {
     const out = await api.exportNote({ title: n.title, html: tmp.innerHTML, format });
@@ -1236,7 +1239,9 @@ async function openHistory() {
   restoreBtn.addEventListener('click', async () => {
     if (!chosen || path !== S.current) return;
     closeOverlay();
-    S.meta = chosen.meta;
+    S.meta = { ...chosen.meta, title: chosen.meta.title || S.meta.title };
+    const cur = currentNote();
+    if (cur) cur.title = S.meta.title;
     editor.replaceDoc(chosen.body, true);
     renderMeta();
     await save(true);
@@ -1344,6 +1349,24 @@ function bindUI() {
   $('#nb-select').addEventListener('change', (e) => S.current && moveNote(S.current, e.target.value));
   $('#status-select').addEventListener('change', (e) => { if (S.meta) { S.meta.status = e.target.value; metaChanged(); } });
   $$('#modes button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+  const titleInput = $('#title-input');
+  titleInput.addEventListener('input', () => {
+    if (!S.meta || isTrashed()) return;
+    S.meta.title = titleInput.value.trim() || 'Untitled';
+    const n = currentNote();
+    if (n) { n.title = S.meta.title; n.meta = S.meta; }
+    onEdit();
+    updateTitle();
+  });
+  titleInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
+      e.preventDefault();
+      editor.view.focus();
+      if (e.key !== 'Escape') editor.view.dispatch({ selection: { anchor: 0 } });
+    }
+  });
+  titleInput.addEventListener('blur', () => { if (!titleInput.value.trim() && S.meta) titleInput.value = ''; });
 
   const tagInput = $('#tag-input');
   tagInput.addEventListener('keydown', (e) => {

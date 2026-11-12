@@ -365,3 +365,15 @@ body.no-note #empty {
 .pl-hash { color: var(--faint); font: 11px var(--mono); min-width: 34px; }
 .palette li.sel .pl-hash { color: rgba(255,255,255,.7); }
 .settings .btn { white-space: nowrap; }
+
+/* ---------- note title field ---------- */
+.title-input {
+  display: block; width: 100%; border: 0; outline: none; background: transparent; color: var(--text);
+  font: 700 22px/1.3 var(--sans); letter-spacing: -0.01em; padding: 4px 24px 6px;
+}
+.title-input::placeholder { color: var(--faint); }
+.title-input[readonly] { color: var(--muted); }
+body.no-note .title-input { display: none; }
+#metabar { padding-left: 22px; }
+.markdown .print-title { display: none; }
+@media print { .markdown .print-title { display: block; } .title-input { display: none !important; } }

@@ -2,8 +2,6 @@
 tags: [guide]
 pinned: true
 ---
-# Welcome to VibeNote
-
 Your notes are plain **Markdown files** in a folder on your Mac. Folders are notebooks (they can be nested), and tags, status and pins live at the top of each file.
 
 ## Get around
@@ -18,6 +16,7 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - Add tags and a status in the bar above the editor
 - Pin important notes with **⌥⌘P**
 - Search with filters: `tag:guide`, `book:Ideas`, `status:active`, `title:welcome`, `is:pinned`, `-tag:old`
+- The title lives in the big field above the editor; it's also the file name
 - Link notes with double brackets, like [[Welcome to VibeNote]]
 
 ## Write

@@ -71,14 +71,6 @@ function notebookDir(rel) {
   return inRoot(path.join(...parts));
 }
 
-function titleOf(body, fallback) {
-  for (const line of body.split('\n')) {
-    const t = line.replace(/^#{1,6}\s+/, '').trim();
-    if (t) return t;
-  }
-  return fallback;
-}
-
 function safeName(title) {
   const s = String(title)
     .replace(/[\/\\:*?"<>|#\x00-\x1f]/g, '')
@@ -107,7 +99,7 @@ function parseScalar(v) {
 }
 
 function parseNote(text) {
-  const meta = { tags: [], status: '', pinned: false, created: '', extra: '' };
+  const meta = { title: '', tags: [], status: '', pinned: false, created: '', extra: '' };
   const m = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
   if (!m) return { meta, body: text };
   const lines = m[1].split(/\r?\n/);
@@ -128,6 +120,8 @@ function parseNote(text) {
       meta.pinned = /^(true|yes)$/i.test(val);
     } else if (key === 'created') {
       meta.created = parseScalar(val);
+    } else if (key === 'title') {
+      meta.title = String(parseScalar(val)).trim();
     } else {
       extra.push(lines[i]);
       while (i + 1 < lines.length && isContinuation(lines[i + 1])) extra.push(lines[++i]);
@@ -141,8 +135,10 @@ function parseNote(text) {
 
 const yamlStr = (s) => (/^[\p{L}\p{N}_][\p{L}\p{N}_ .\/-]*$/u.test(s) && !/^(true|false|yes|no|null|~)$/i.test(s) ? s : JSON.stringify(s));
 
-function serializeNote(meta = {}, body = '') {
+// fileBase: the note's file name without .md — a title only needs storing if it differs from that.
+function serializeNote(meta = {}, body = '', fileBase = '') {
   const lines = [];
+  if (meta.title && meta.title !== fileBase) lines.push(`title: ${yamlStr(meta.title)}`);
   const tags = (meta.tags || []).filter(Boolean);
   if (tags.length) lines.push(`tags: [${tags.map(yamlStr).join(', ')}]`);
   if (STATUSES.includes(meta.status)) lines.push(`status: ${meta.status}`);
@@ -157,13 +153,14 @@ async function readNote(file, notebook, extra = {}) {
   const [text, st] = await Promise.all([fsp.readFile(file, 'utf8'), fsp.stat(file)]);
   const { meta, body } = parseNote(text);
   const name = path.basename(file, '.md');
+  meta.title = meta.title || name;
   const created = (meta.created && Date.parse(meta.created)) || st.birthtimeMs;
   return {
     id: `${st.dev}-${st.ino}`,
     path: file,
     notebook,
     name,
-    title: titleOf(body, name),
+    title: meta.title,
     body,
     meta,
     mtime: st.mtimeMs,
@@ -326,18 +323,24 @@ ipcMain.handle('vault:choose', async (e) => {
   return config.root;
 });
 
-ipcMain.handle('note:read', async (_e, p) => parseNote(await fsp.readFile(inRoot(p), 'utf8')));
+ipcMain.handle('note:read', async (_e, p) => {
+  const file = inRoot(p);
+  const note = parseNote(await fsp.readFile(file, 'utf8'));
+  note.meta.title = note.meta.title || path.basename(file, '.md');
+  return note;
+});
 
-// Write, then rename the file to match the note's title. Returns the (possibly new) path.
+// Rename the file to match the note's title, then write it. Returns the (possibly new) path.
 ipcMain.handle('note:save', async (_e, p, meta, body, forceSnapshot) => {
   let file = inRoot(p);
   if (file.startsWith(trashDir() + path.sep)) throw new Error('Notes in the Trash are read-only');
-  await fsp.writeFile(file, serializeNote(meta, body), 'utf8');
-  const desired = uniquePath(path.dirname(file), safeName(titleOf(body, 'Untitled')), file);
+  const title = String(meta.title || '').trim() || 'Untitled';
+  const desired = uniquePath(path.dirname(file), safeName(title), file);
   if (desired !== file) {
     await fsp.rename(file, desired);
     file = desired;
   }
+  await fsp.writeFile(file, serializeNote({ ...meta, title }, body, path.basename(file, '.md')), 'utf8');
   snapshot(file, forceSnapshot).catch(() => {});
   return file;
 });
@@ -348,7 +351,7 @@ ipcMain.handle('note:create', async (_e, notebook, title) => {
   const dir = notebookDir(notebook);
   await fsp.mkdir(dir, { recursive: true });
   const file = uniquePath(dir, safeName(title || 'Untitled'));
-  await fsp.writeFile(file, title ? `# ${title}\n\n` : '', { flag: 'wx' });
+  await fsp.writeFile(file, serializeNote({ title: title || '' }, '', path.basename(file, '.md')), { flag: 'wx' });
   return file;
 });
 
@@ -431,8 +434,10 @@ ipcMain.handle('note:history', async (_e, p) => {
 
 ipcMain.handle('note:history-read', async (_e, p, id) => {
   if (!/^\d+\.md$/.test(id)) throw new Error('Bad snapshot id');
-  const dir = await histDir(inRoot(p));
-  return parseNote(await fsp.readFile(path.join(dir, id), 'utf8'));
+  const file = inRoot(p);
+  const note = parseNote(await fsp.readFile(path.join(await histDir(file), id), 'utf8'));
+  note.meta.title = note.meta.title || path.basename(file, '.md');
+  return note;
 });
 
 ipcMain.handle('note:export', async (e, { title, html, format }) => {
@@ -767,6 +772,7 @@ app.on('before-quit', () => { quitting = true; });
 app.whenReady().then(async () => {
   loadConfig();
   applyTheme();
+  if (isMac && !app.isPackaged) app.dock.setIcon(path.join(__dirname, 'build', 'icon.png'));
   if (!fs.existsSync(rootDir())) {
     await fsp.mkdir(path.join(rootDir(), 'Ideas'), { recursive: true });
     await fsp.writeFile(path.join(rootDir(), 'Welcome to VibeNote.md'), fs.readFileSync(path.join(__dirname, 'welcome.md'), 'utf8'));

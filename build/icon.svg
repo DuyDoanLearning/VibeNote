@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="0.5" stop-color="#7c5cff"/>
+      <stop offset="1" stop-color="#4c1d95"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.3" cy="0.18" r="0.75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="page" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#efeaff"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe08a"/>
+      <stop offset="1" stop-color="#ffb020"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="20" stdDeviation="24" flood-color="#1b0b4a" flood-opacity="0.35"/>
+    </filter>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#5b2e00" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- macOS-style rounded square -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#glow)"/>
+
+  <!-- note page with a folded corner -->
+  <g filter="url(#shadow)">
+    <path d="M318 236 H598 L726 364 V748 A44 44 0 0 1 682 792 H318 A44 44 0 0 1 274 748 V280 A44 44 0 0 1 318 236 Z" fill="url(#page)"/>
+    <path d="M598 236 V320 A44 44 0 0 0 642 364 H726 Z" fill="#c9b8ff"/>
+  </g>
+
+  <!-- text lines: a bold title line, then body lines -->
+  <rect x="330" y="408" width="250" height="40" rx="20" fill="#7c5cff"/>
+  <rect x="330" y="490" width="340" height="26" rx="13" fill="#d9cfff"/>
+  <rect x="330" y="552" width="300" height="26" rx="13" fill="#d9cfff"/>
+  <rect x="330" y="614" width="220" height="26" rx="13" fill="#d9cfff"/>
+
+  <!-- sparkle -->
+  <g filter="url(#soft)">
+    <path d="M716 556 Q731 671 846 686 Q731 701 716 816 Q701 701 586 686 Q701 671 716 556 Z" fill="url(#spark)" stroke="#ffffff" stroke-width="14" stroke-linejoin="round"/>
+    <path d="M818 538 Q823 574 859 579 Q823 584 818 620 Q813 584 777 579 Q813 574 818 538 Z" fill="#ffffff" opacity="0.95"/>
+  </g>
+</svg>
