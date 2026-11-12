@@ -27,13 +27,13 @@ It runs on **your installed [Claude Code](https://claude.com/claude-code)** and 
 
 | Version | Where |
 |---|---|
-| Stable markdown app | tag `v1.0-stable` (branch `main`) |
+| Stable markdown app | branch `main`, tags `v*-stable` (newest: `v1.0.1-stable`) |
 | Experimental (Claude panel) | branch `agent` |
 
 Install any version into /Applications (notes and settings are not touched):
 
 ```sh
-scripts/install-version.sh              # back to the stable release
+scripts/install-version.sh              # back to the newest stable release
 scripts/install-version.sh agent        # the experimental build
 scripts/install-version.sh <commit>     # anything else
 ```
