@@ -75,7 +75,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
 body {
   background: var(--bg);
   color: var(--text);
@@ -94,6 +94,9 @@ kbd { font: 11px var(--sans); opacity: 0.7; margin-left: 6px; }
   display: grid;
   grid-template-columns: 230px 310px minmax(0, 1fr);
   height: 100vh;
+  /* one row exactly the window's height — without this the row grows with a long note and the whole window scrolls */
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
   transition: grid-template-columns .2s ease;
 }
 body.no-sidebar #app { grid-template-columns: 0 310px minmax(0, 1fr); }
@@ -252,7 +255,7 @@ body.in-trash #trash-tools { display: flex; }
 #tag-input::placeholder { color: var(--faint); }
 #tag-input::-webkit-calendar-picker-indicator { display: none !important; }
 
-#panes { flex: 1; display: grid; min-height: 0; }
+#panes { flex: 1; display: grid; min-height: 0; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
 #panes.split { grid-template-columns: 1fr 1fr; }
 #panes.edit { grid-template-columns: 1fr; }
 #panes.edit #preview { display: none; }

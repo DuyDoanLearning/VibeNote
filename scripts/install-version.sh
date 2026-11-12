@@ -1,14 +1,15 @@
 #!/bin/sh
 # Build any version of VibeNote from git and install it into /Applications.
 #
-#   scripts/install-version.sh                # the stable release (tag v1.0-stable)
+#   scripts/install-version.sh                # the newest stable release (latest v*-stable tag)
 #   scripts/install-version.sh agent          # the latest experimental build
 #   scripts/install-version.sh <commit/tag>   # any other version
 #
 # Your notes and settings are untouched: they live outside the app.
 set -e
-REF="${1:-v1.0-stable}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+git -C "$REPO" fetch -q --tags origin 2>/dev/null || true
+REF="${1:-$(git -C "$REPO" tag -l 'v*-stable' --sort=-v:refname | head -1)}"
 WORK="$(mktemp -d)"
 echo "→ Building VibeNote at '$REF'…"
 git -C "$REPO" fetch -q --tags origin 2>/dev/null || true

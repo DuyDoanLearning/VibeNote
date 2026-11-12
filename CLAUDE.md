@@ -17,9 +17,9 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - When a user-facing feature changes, update `welcome.md` (first-run note) and, if asked, the owner's "Guide" notebook notes (in their notes folder, not the repo).
 
 ## Branches / releases
-- `main` + tag `v1.0-stable` = the stable Markdown app. Keep it stable; only fixes and docs go here.
+- `main` + tags `v*-stable` (newest: `v1.0.1-stable`) = the stable Markdown app. Keep it stable; only fixes and docs go here. Tag each stable fix release `vX.Y.Z-stable` (the install script picks the newest).
 - `agent` = the experimental Claude panel (spec: `docs/agent-spec.md`). Experimental work goes here.
-- `scripts/install-version.sh <ref>` builds any version in a temporary worktree and installs it into /Applications — the owner's rollback path (`v1.0-stable`) and upgrade path (`agent`).
+- `scripts/install-version.sh <ref>` builds any version in a temporary worktree and installs it into /Applications — the owner's rollback path (no argument = newest `v*-stable` tag) and upgrade path (`agent`).
 
 ## Principles
 - **Notes are plain files.** `.md` files in a folder, notebooks = folders (nestable), metadata = YAML front matter (`title`, `tags`, `status`, `pinned`, `created`; unknown keys are preserved in `meta.extra`). Never introduce a database or hidden per-note state — the notes folder must stay syncable between Macs.
