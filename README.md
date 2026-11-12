@@ -22,7 +22,7 @@ A Markdown note-taking app for macOS, built with Electron. Inspired by Inkdrop, 
 Requirements: macOS, [Node.js](https://nodejs.org) 20+ and git.
 
 ```sh
-git clone <this repo url> VibeNote
+git clone https://github.com/DuyDoanLearning/VibeNote.git
 cd VibeNote
 npm install
 npm start            # build and run in development
@@ -74,3 +74,7 @@ The notes folder is self-contained, so it can be synced between Macs (iCloud Dri
 - `npm run build` — bundle `src/` into `dist/` (esbuild) and copy KaTeX / Mermaid assets
 - `npm run package` — build `VibeNote.app` into `release/`
 - `npm run smoke` — run the smoke test (prints where the screenshots are saved)
+
+## License
+
+MIT — see [LICENSE](LICENSE).
