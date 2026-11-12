@@ -8,7 +8,8 @@
   "scripts": {
     "build": "node build.mjs",
     "start": "npm run build && electron .",
-    "package": "npm run build && electron-packager . VibeNote --platform=darwin --out=release --overwrite --ignore=\"^/(src|release|node_modules|README.md|build.mjs)\""
+    "package": "npm run build && electron-packager . VibeNote --platform=darwin --out=release --overwrite --ignore=\"^/(src|release|node_modules|README.md|build.mjs|CLAUDE.md|scripts)\"",
+    "smoke": "npm run build && electron scripts/smoke-test.js"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",
