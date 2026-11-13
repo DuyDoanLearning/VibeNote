@@ -13,6 +13,7 @@ import { createApiDocs } from './apidocs.js';
 import { createChatsUI } from './chats-ui.js';
 import { createChangesUI } from './changes-ui.js';
 import { createProjectUI } from './project-ui.js';
+import { createDiagramUI } from './diagram-ui.js';
 import { diffLines } from 'diff';
 import { splitTarget, parseOperation, apiOperations, embeddedSpecs, mdHeadings, linksTo } from './links.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
@@ -118,6 +119,7 @@ function findByTitle(t) {
 }
 
 // ---------- editor ----------
+var diagramUI = null; // draw.io diagrams: sidebar section + editor view (created further down)
 var projectUI = null; // projects: sidebar section + home page (created further down)
 let comments = null; // comments panel (created further down; the editor reports selections and clicks to it)
 const editor = createEditor({
@@ -238,6 +240,7 @@ async function refresh() {
       S.notebooks = data.notebooks;
       S.notes = data.notes;
       await projectUI?.reload();
+      await diagramUI?.reload();
       validateFilter();
       if (S.current) {
         let cur = currentNote();
@@ -293,6 +296,7 @@ async function leaveCurrent() {
 async function openNote(path) {
   if (path === S.current) return;
   await leaveCurrent();
+  await diagramUI?.close(true);
   const n = S.notes.find((x) => x.path === path);
   if (!n) return;
   if (!S.navigating && S.current) {
@@ -696,7 +700,7 @@ function renderAll() {
 let homeTimer = null;
 let homeAt = 0;
 function homeSoon() {
-  if (!S.home || S.current || !projectUI) return;
+  if (!S.home || S.current || S.diagram || !projectUI) return;
   clearTimeout(homeTimer);
   homeTimer = setTimeout(() => { homeAt = Date.now(); if (S.home && !S.current) projectUI.renderHome(); }, Math.max(300, 4000 - (Date.now() - homeAt)));
 }
@@ -740,6 +744,7 @@ function renderSidebar() {
   const notes = live();
 
   projectUI?.renderSide();
+  diagramUI?.renderSide();
   const lib = $('#library');
   lib.textContent = '';
   lib.append(
@@ -1073,7 +1078,7 @@ function renderToolbar() {
   const n = currentNote();
   document.body.classList.toggle('no-note', !n);
   document.body.classList.toggle('project-home', !n && !!S.home);
-  const chipFor = n && !n.trashed ? projectUI?.projectOf(n) : null;
+  const chipFor = n && !n.trashed ? projectUI?.projectOf(n) : S.diagram ? projectUI?.projectOfPath(S.diagram) : null;
   const pchip = $('#project-chip');
   pchip.hidden = !chipFor;
   if (chipFor) { pchip.lastElementChild.textContent = chipFor; pchip.title = `Part of the project “${chipFor}” — open its home page`; pchip.dataset.project = chipFor; }
@@ -1720,6 +1725,8 @@ const COMMANDS = [
   { id: 'sections-expand', title: 'Expand All Note List Headings', when: () => !SINGLE && S.sections.length > 0, run: () => setSections(true) },
   { id: 'sections-collapse', title: 'Collapse All Note List Headings', when: () => !SINGLE && S.sections.length > 0, run: () => setSections(false) },
   { id: 'settings', title: 'Settings', key: '⌘,', run: openSettings },
+  { id: 'new-diagram', title: 'New Diagram (draw.io)', when: () => !SINGLE, run: () => diagramUI.create(S.home || (S.filter.type === 'notebook' ? S.filter.name : '')) },
+  { id: 'open-diagram', title: 'Open Diagram File…', when: () => !SINGLE, run: () => diagramUI.pick() },
   { id: 'new-project', title: 'New Project…', when: () => !SINGLE, run: () => projectUI.newProject() },
   { id: 'project-home', title: 'Go to Project Home', when: () => !SINGLE && !!(projectUI.projectOf(currentNote()) || S.project), run: () => projectUI.openHome(projectUI.projectOf(currentNote()) || S.project) },
   { id: 'new-chat', title: 'New Claude Chat in This Project', run: () => { comments.toggle(false); agentPanel.toggle(true); agentPanel.newThread(); } },
@@ -1782,6 +1789,7 @@ function bindUI() {
   $('#back-btn').addEventListener('click', () => navigate(-1));
   $('#image-btn').addEventListener('click', insertImages);
   $('#project-add').addEventListener('click', () => projectUI.newProject());
+  $('#diagram-add').addEventListener('click', () => diagramUI.addMenu(S.home || (S.filter.type === 'notebook' ? S.filter.name : '')));
   $('#project-chip').addEventListener('click', (e) => projectUI.openHome(e.currentTarget.dataset.project));
   $('#agent-btn').addEventListener('click', () => { comments.toggle(false); agentPanel.toggle(); });
   window.addEventListener('vibe:insert-image', insertImages);
@@ -1902,6 +1910,7 @@ const agentPanel = createAgentPanel({
   api,
   getContext: () => {
     const n = currentNote();
+    if (S.diagram) return { notebook: projectUI?.projectOfPath(S.diagram) || '', notePath: S.diagram, noteTitle: `${S.diagram.split('/').pop()} (a draw.io diagram, open in the editor)` };
     return {
       notebook: (n ? projectUI?.projectOf(n) || n.notebook : S.home || (S.filter.type === 'notebook' ? S.filter.name : '')),
       notePath: n && !n.trashed ? n.path : null,
@@ -1946,11 +1955,19 @@ const chatsUI = createChatsUI({
   },
 });
 
+diagramUI = createDiagramUI({
+  api, S, $, el, toast, isDark, leaveCurrent, closeNote,
+  afterChange: () => { renderAll(); agentPanel.noteChanged(); },
+});
+
 projectUI = createProjectUI({
+  openDiagram: (p) => diagramUI.open(p),
+  newDiagram: (nb) => diagramUI.create(nb),
+  closeDiagram: () => diagramUI.close(true),
   api, S, $, el, esc, overlay, closeOverlay, toast, live, inBook, kindOf, fmtDate, openNote, setFilter, leaveCurrent, closeNote, refresh, store, load, currentNote,
   reserved: [CONFLUENCE_ROOT, API_ROOT],
   agent: () => agentPanel,
-  openChats: () => chatsUI.open(),
+  openChats: (target) => chatsUI.open(target),
   openChanges: () => changesUI.open(),
   rerenderList: () => renderList(),
 });

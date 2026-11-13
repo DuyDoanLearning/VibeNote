@@ -11,6 +11,7 @@ const ICON = {
   book: '<svg viewBox="0 0 24 24"><path d="M5 4h12a2 2 0 012 2v14H7a2 2 0 01-2-2zM5 18a2 2 0 012-2h12"/></svg>',
   repo: '<svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="9" r="2.2"/><path d="M6 8.2v7.6M18 11.2c0 3-3 3.3-6 3.8-2 .3-4 .6-5 1.6"/></svg>',
   chat: '<svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>',
+  diagram: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="6" rx="1"/><rect x="14" y="15" width="7" height="6" rx="1"/><rect x="3" y="15" width="7" height="6" rx="1"/><path d="M6.5 9v6M6.5 12h11v3"/></svg>',
 };
 const KIND_LABEL = { note: 'Note', confluence: 'Confluence', api: 'API spec' };
 const STATUS_TEXT = { 'needs-ok': 'Needs your OK', working: 'Working…', idle: '' };
@@ -45,6 +46,14 @@ export function createProjectUI(ctx) {
     if (find(top)) return top;
     const owners = S.projects.filter((p) => p.sources.some((s) => inSource(n, s)));
     return (owners.find((p) => p.name === S.project) || owners[0])?.name || null;
+  }
+
+  function projectOfPath(p) {
+    if (p.startsWith(S.root + '/')) {
+      const top = p.slice(S.root.length + 1).split('/')[0];
+      if (find(top)) return top;
+    }
+    return S.projects.find((x) => x.repo && p.startsWith(x.repo + '/'))?.name || null;
   }
 
   async function reload() {
@@ -125,6 +134,7 @@ export function createProjectUI(ctx) {
   async function openHome(name) {
     if (!find(name)) return;
     await leaveCurrent();
+    await ctx.closeDiagram?.();
     S.home = name;
     S.project = name;
     store('project', name);
@@ -263,6 +273,25 @@ export function createProjectUI(ctx) {
       dc.append(src);
     }
 
+    // ----- diagrams -----
+    const mine = (S.diagrams?.notes || []).filter((d) => d.notebook === name || d.notebook.startsWith(name + '/'));
+    const drawings = [...mine.map((d) => ({ ...d, where: '' })), ...(h.diagrams || []).map((d) => ({ ...d, where: d.rel.includes('/') ? d.rel.slice(0, d.rel.lastIndexOf('/')) : '' }))];
+    const gc = card('ph-diagrams', 'Diagrams', small('New', () => ctx.newDiagram(name)));
+    if (!drawings.length) {
+      gc.append(el('p', 'ph-hint', 'draw.io diagrams in this project’s notebook or code folder show up here. They open in the full draw.io editor, and refresh when Claude edits the file.'));
+    } else {
+      const gl = el('ul', 'ph-list');
+      for (const d of drawings) {
+        const li = el('li', 'ph-item');
+        li.append(iconEl(ICON.diagram), el('span', 'ph-item-title', d.name));
+        if (d.where) li.append(chip(d.where, 'branch'));
+        li.title = d.path;
+        li.addEventListener('click', () => ctx.openDiagram(d.path));
+        gl.append(li);
+      }
+      gc.append(gl);
+    }
+
     // ----- code -----
     const cc = card('ph-code', 'Code', h.repo && !h.repoMissing ? small('Chat on all of it', () => newChat(name)) : null);
     if (!h.repo || h.repoMissing) {
@@ -314,7 +343,8 @@ export function createProjectUI(ctx) {
         li.append(iconEl(ICON.chat), el('span', 'ph-item-title', c.title || c.first || 'Untitled chat'));
         if (c.sub) li.append(chip(c.sub.split('/').pop(), 'branch'));
         li.append(chip(c.source === 't3' ? 'T3 Code' : 'Claude Code'), el('span', 'ph-when', fmtDate(c.updated)));
-        li.addEventListener('click', () => ctx.openChats?.());
+        li.title = 'Read this chat; “Continue” there carries it on as a new chat of this project';
+        li.addEventListener('click', () => ctx.openChats?.({ cwd: h.repo, id: c.id }));
         pl.append(li);
       }
       hc.append(pl, small('See all past chats…', () => ctx.openChats?.()));
@@ -431,5 +461,5 @@ export function createProjectUI(ctx) {
     }, 400);
   });
 
-  return { reload, renderSide, renderHome, openHome, newProject, addDocs, projectOf, find, docsOf };
+  return { reload, renderSide, renderHome, openHome, newProject, addDocs, projectOf, projectOfPath, find, docsOf };
 }

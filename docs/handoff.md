@@ -22,6 +22,11 @@ live test), several chats per project with a switcher in the Claude panel, proje
 real projects: expect feedback. The owner's real "VibeNote Dev" notebook shows up as a project automatically
 (it has a linked folder).
 
+**Step 2 (2026-11-14): draw.io diagrams** inside VibeNote, **a model / effort / mode per chat**, and earlier chats
+open directly from the home page. See `docs/workspace-spec.md` → Step 2 and CLAUDE.md → Diagrams. Tested in an
+isolated profile (open, save through the editor's message, outside change reloads, write guards, a real 67 KB
+diagram renders). Real keyboard shortcuts inside the editor could not be tested automatically.
+
 ## What v1.1.0 brought into stable (newest first)
 
 | Feature | Where | Notes |

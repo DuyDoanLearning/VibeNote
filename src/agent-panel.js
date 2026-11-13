@@ -600,9 +600,8 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     const banner = $('.agent-banner');
     banner.hidden = !!ctx.claudePath;
     banner.textContent = ctx.claudePath ? '' : 'Claude Code isn’t installed (or can’t be found). Install it from claude.com/claude-code, run `claude` once in Terminal to log in, then reopen this panel.';
-    const s = await api.getSettings();
-    $('.agent-mode').value = s.agentMode || 'default';
-    showModel(s.agentModel || '');
+    $('.agent-mode').value = ctx.mode || 'default';
+    showModel(ctx.model || '');
     if (ctx.key !== loadedKey) { slash.reset(); loadedKey = ctx.key; }
     renderHistory(ctx.items || []);
     setBusy(!!ctx.busy);

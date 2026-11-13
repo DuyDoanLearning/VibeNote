@@ -46,6 +46,11 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - Extra documents: `sources:` list in the brief's front matter (kept in `meta.extra`; `projects.parseSources` / `setSources`). The renderer decides membership (`projectUI.projectOf(note)`), main only stores the list.
 - `projects.js` runs git read-only with hooks/fsmonitor disabled. The home page is throttled (`homeSoon`) because it asks git for news.
 
+## Diagrams (agent branch)
+- `.drawio` files are **not notes**: `src/diagram-ui.js` shows them in a third main-area state (`S.diagram`, `body.diagram-open`) next to "note" and "project home". IPC `diagrams:*` in main.js; `diagramFile()` only allows files in the notes folder, a linked project folder, or picked by the user (`config.recentDiagrams`).
+- The draw.io web app is downloaded by `build.mjs` (pinned version + SHA-256, cached in `~/Library/Caches/VibeNote/`), trimmed, and served from `dist/drawio` through the `vibe-drawio://` protocol with a CSP that blocks all outside requests. To update draw.io: change `DRAWIO.version` and `sha256` in build.mjs, rebuild, and re-run a diagram test (check for missing files).
+- Embed protocol: `?embed=1&proto=json`; the frame posts `init` / `autosave` / `save`, VibeNote posts `load` / `status`. Test trick: `win.webContents.mainFrame.framesInSubtree` finds the frame; post a fake `autosave` from inside it.
+
 ## Commands
 - `npm start` — build + run (dev)
 - `npm run build` — `build.mjs`: bundles `src/renderer.js` → `dist/renderer.js` and `src-main/agent.js` → `dist/agent.mjs`, copies KaTeX + Mermaid into `dist/`
@@ -69,7 +74,7 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - Details and today's lessons: `docs/handoff.md`.
 
 ## What's next
-- Projects workspace steps 2–5 in `docs/workspace-spec.md` (next: draw.io viewer/editor).
+- Projects workspace steps 3–5 in `docs/workspace-spec.md` (next: the coding layout).
 - See `docs/handoff.md` → "Parked / next": Confluence sync & comments (parked), real end-to-end Publish test.
 - Agent phases 2–4 (`docs/agent-spec.md`): Plan/Build buttons and templates, automatic change-log/commit links, codebase map, explain-as-notes, diff viewer, other agents (Codex).
 - Backlog with the owner's top picks: `docs/ideas.md` (⭐ git sync for notes, ⭐ "why does this line exist?", ⭐ a branch per spec).

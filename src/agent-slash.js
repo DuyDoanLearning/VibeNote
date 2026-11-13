@@ -204,9 +204,7 @@ export function createSlash({ api, input, menuHost, getNotebook, addCard, action
 
   async function effort(nb, arg) {
     const set = async (lv) => {
-      await api.agent.setEffort(nb, lv);
-      const s = await api.getSettings();
-      return s.agentEffort;
+      return api.agent.setEffort(nb, lv); // this chat only
     };
     if (arg) {
       const lv = arg.toLowerCase();
@@ -215,7 +213,7 @@ export function createSlash({ api, input, menuHost, getNotebook, addCard, action
       addCard(el('div', 'result-line', `Effort: ${lv}`));
       return;
     }
-    const cur = (await api.getSettings()).agentEffort || 'default';
+    const cur = (await api.agent.context(nb)).effort || 'default';
     const c = card('Effort — how hard Claude thinks');
     const row = el('div', 'slash-seg');
     for (const lv of ['default', ...EFFORTS]) {

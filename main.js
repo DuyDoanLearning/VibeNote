@@ -8,7 +8,9 @@
 // Note metadata (tags, status, pinned) lives in YAML front matter at the top of each file.
 // Revision history is local-only, in <userData>/history/<file inode>/<timestamp>.md.
 
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, net, protocol } = require('electron');
+// The bundled draw.io editor runs in a frame with its own origin (so it can load its files but not touch VibeNote).
+protocol.registerSchemesAsPrivileged([{ scheme: 'vibe-drawio', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
@@ -119,6 +121,7 @@ function loadConfig() {
     if (c.root) config.root = c.root;
     if (c.projects && typeof c.projects === 'object') config.projects = c.projects;
     if (c.projectSeen && typeof c.projectSeen === 'object') config.projectSeen = c.projectSeen;
+    if (Array.isArray(c.recentDiagrams)) config.recentDiagrams = c.recentDiagrams.filter((x) => typeof x === 'string');
     config.settings = { ...DEFAULT_SETTINGS, ...(c.settings || {}) };
   } catch {}
 }
@@ -902,6 +905,17 @@ function projectThreads(name) {
   return pt;
 }
 const chatKey = (name, id) => (id ? `${name}#${id}` : name);
+// Each chat can have its own model, effort and permission mode; without one it uses the defaults from Settings.
+function threadByKey(key) {
+  const i = String(key).indexOf('#');
+  const name = i < 0 ? String(key) : key.slice(0, i);
+  const id = i < 0 ? '' : key.slice(i + 1);
+  return projectThreads(name).list.find((t) => t.id === id) || null;
+}
+const chatPrefs = (key) => {
+  const t = threadByKey(key) || {};
+  return { model: t.model ?? config.settings.agentModel ?? '', effort: t.effort ?? config.settings.agentEffort ?? '', mode: t.mode ?? config.settings.agentMode ?? 'default' };
+};
 const isProjectName = (name) => !!name && (!!config.projects[name] || fs.existsSync(path.join(rootDir(), name, projects.BRIEF)));
 
 // The project a notebook belongs to, and which of its chats is in front.
@@ -923,6 +937,7 @@ function systemPromptFor(project, info = {}) {
     `- The user's notes are plain Markdown files in ${root}. Notebooks are folders. A note's title is its file name (an optional "title:" in the YAML front matter overrides it). Front matter may also hold tags, status (active/onhold/completed/dropped) and pinned — keep it intact.`,
     '- You can read and edit notes directly with your file tools; the user sees your edits appear live in the editor.',
     '- Every note has a version history (who changed it — You, Claude or Confluence — and when). Use the note_history tool (mcp__vibenote__note_history) to list a note\'s versions or see exactly what changed in one, e.g. when asked what changed recently or why something is different.',
+    '- Diagrams are draw.io files (.drawio, XML). When the user has one open in VibeNote they see your edits to the file appear live. Write uncompressed <mxGraphModel> XML, keep existing cell ids, and change only what was asked.',
     '- API specs are OpenAPI YAML/JSON files in the notes folder; [[Title]] and [[Title#Heading]] / [[Spec#GET /path]] link notes, Confluence pages and specs.',
   ];
   if (project.name && info.sources?.length) {
@@ -995,9 +1010,9 @@ async function ensureChat(wc, key, project) {
     // a chat focused on one repository can still read the rest of the workspace (upstream / downstream services)
     additionalDirectories: project.repo ? [rootDir(), ...(cwd !== project.repo ? [project.repo] : [])] : [],
     appendSystemPrompt: systemPromptFor(project, info),
-    model: config.settings.agentModel,
-    effort: config.settings.agentEffort || undefined,
-    permissionMode: config.settings.agentMode,
+    model: chatPrefs(key).model,
+    effort: chatPrefs(key).effort || undefined,
+    permissionMode: chatPrefs(key).mode,
     resume: state.sessionId,
     claudePath,
     env,
@@ -1064,6 +1079,7 @@ ipcMain.handle('agent:context', async (_e, notebook) => {
     notebook: project.name || project.notebook || '',
     repo: project.repo,
     cwd: state.cwd || null,
+    ...chatPrefs(project.key),
     claudePath,
     busy: !!live?.chat?.busy,
     items: state.items || [],
@@ -1116,27 +1132,27 @@ const liveChat = async (e, notebook) => {
   return (await ensureChat(e.sender, project.key, project)).chat;
 };
 ipcMain.handle('agent:commands', async (e, nb) => (await liveChat(e, nb)).commands());
-ipcMain.handle('agent:models', async (e, nb) => ({ models: await (await liveChat(e, nb)).models(), current: config.settings.agentModel || '' }));
+ipcMain.handle('agent:models', async (e, nb) => ({ models: await (await liveChat(e, nb)).models(), current: chatPrefs(projectFor(nb).key).model }));
 ipcMain.handle('agent:set-model', async (e, nb, value) => {
   const v = value === 'default' ? '' : String(value || '');
   await (await liveChat(e, nb)).setModel(v);
-  config.settings.agentModel = v;
-  saveConfig();
+  const th = threadByKey(projectFor(nb).key);
+  if (th) { th.model = v; saveThreads(); } // this chat only; Settings → Claude holds the default for new chats
   return v;
 });
 ipcMain.handle('agent:set-effort', async (e, nb, level) => {
   const v = level === 'default' ? '' : String(level || '');
   await (await liveChat(e, nb)).setEffort(v);
-  config.settings.agentEffort = v;
-  saveConfig();
+  const th = threadByKey(projectFor(nb).key);
+  if (th) { th.effort = v; saveThreads(); }
   return v;
 });
 ipcMain.handle('agent:usage', async (e, nb) => (await liveChat(e, nb)).usage());
 ipcMain.handle('agent:context-usage', async (e, nb) => (await liveChat(e, nb)).contextUsage());
 ipcMain.handle('agent:mcp', async (e, nb) => (await liveChat(e, nb)).mcpStatus());
 ipcMain.handle('agent:mode', async (_e, key, mode) => {
-  config.settings.agentMode = mode;
-  saveConfig();
+  const th = threadByKey(key);
+  if (th) { th.mode = mode; saveThreads(); }
   await chats.get(key)?.chat.setMode(mode);
 });
 ipcMain.handle('agent:new', (_e, key) => {
@@ -1172,6 +1188,7 @@ function threadList(name) {
         title: t.title || (first ? first.text.replace(/<vibenote-context>[\s\S]*?<\/vibenote-context>\s*/, '').replace(/\s+/g, ' ').trim().slice(0, 60) : '') || 'New chat',
         scope: saved.cwd && repo && saved.cwd !== repo ? path.relative(repo, saved.cwd) : '',
         empty: !first,
+        model: t.model || '',
         status: chatStatus(key),
         updated,
       };
@@ -1244,6 +1261,108 @@ ipcMain.handle('agent:thread-delete', (_e, notebook, id) => {
   saveThreads();
 });
 
+// ---------- diagrams (draw.io files, edited in the bundled draw.io editor) ----------
+const DRAWIO_DIR = path.join(__dirname, 'dist', 'drawio');
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.gif': 'image/gif', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.xml': 'text/xml; charset=utf-8', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.wasm': 'application/wasm' };
+function serveDrawio() {
+  protocol.handle('vibe-drawio', async (req) => {
+    const rel = decodeURIComponent(new URL(req.url).pathname).replace(/^\/+/, '') || 'index.html';
+    const file = path.resolve(DRAWIO_DIR, rel);
+    if (!file.startsWith(DRAWIO_DIR + path.sep)) return new Response('forbidden', { status: 403 });
+    try {
+      const ext = path.extname(file).toLowerCase();
+      const headers = { 'content-type': MIME[ext] || 'application/octet-stream' };
+      // The editor may only load its own bundled files: nothing in a diagram can be sent anywhere.
+      if (ext === '.html') headers['content-security-policy'] = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' data: blob:; form-action 'none'";
+      return new Response(await fsp.readFile(file), { headers });
+    } catch {
+      return new Response('not found', { status: 404 });
+    }
+  });
+}
+const EMPTY_DIAGRAM = '<mxfile host="VibeNote"><diagram name="Page-1" id="page-1"><mxGraphModel dx="1000" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>\n';
+const isDiagram = (f) => /\.drawio$/i.test(f);
+// A diagram may be opened if it is in the notes folder, in a project's code folder, or was picked by the user.
+function diagramFile(p) {
+  const file = path.resolve(String(p || ''));
+  if (!isDiagram(file)) throw new Error('Not a .drawio file.');
+  const inside = (dir) => !!dir && file.startsWith(path.resolve(dir) + path.sep);
+  if (inside(rootDir()) || Object.values(config.projects).some(inside) || (config.recentDiagrams || []).includes(file)) return file;
+  throw new Error('This diagram is outside your notes and project folders. Use “Open Diagram File…” to open it.');
+}
+const diagramWatch = new Map(); // window id → { file, onChange }
+const diagramWrote = new Map(); // file → mtime of our own last save (so we don't report it as an outside change)
+const diagramBackedUp = new Set();
+function unwatchDiagram(id) {
+  const w = diagramWatch.get(id);
+  if (w) { fs.unwatchFile(w.file, w.onChange); diagramWatch.delete(id); }
+}
+ipcMain.handle('diagrams:available', () => fs.existsSync(path.join(DRAWIO_DIR, 'index.html')));
+ipcMain.handle('diagrams:list', async () => {
+  const found = await projects.findFiles(rootDir(), /\.drawio$/i, 6, 300);
+  const stat = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
+  return {
+    notes: found.map((f) => ({ path: f, name: path.basename(f).replace(/\.drawio$/i, ''), notebook: path.relative(rootDir(), path.dirname(f)).split(path.sep).join('/'), mtime: stat(f) })),
+    recent: (config.recentDiagrams || []).filter((f) => fs.existsSync(f)).map((f) => ({ path: f, name: path.basename(f).replace(/\.drawio$/i, ''), folder: path.dirname(f), mtime: stat(f) })),
+  };
+});
+ipcMain.handle('diagrams:new', async (_e, notebook, title) => {
+  const dir = notebookDir(String(notebook || ''));
+  await fsp.mkdir(dir, { recursive: true });
+  const file = uniquePath(dir, safeName(title || 'Untitled diagram'), null, '.drawio');
+  await fsp.writeFile(file, EMPTY_DIAGRAM, { flag: 'wx' });
+  return file;
+});
+ipcMain.handle('diagrams:pick', async (e) => {
+  const r = await dialog.showOpenDialog(winOf(e), { title: 'Open a draw.io diagram', properties: ['openFile'], filters: [{ name: 'draw.io diagrams', extensions: ['drawio'] }] });
+  if (r.canceled || !r.filePaths[0] || !isDiagram(r.filePaths[0])) return null;
+  const file = path.resolve(r.filePaths[0]);
+  config.recentDiagrams = [file, ...(config.recentDiagrams || []).filter((x) => x !== file)].slice(0, 12);
+  saveConfig();
+  return file;
+});
+ipcMain.handle('diagrams:forget', (_e, p) => {
+  config.recentDiagrams = (config.recentDiagrams || []).filter((x) => x !== path.resolve(String(p)));
+  saveConfig();
+});
+ipcMain.handle('diagrams:read', async (e, p) => {
+  const file = diagramFile(p);
+  const st = await fsp.stat(file);
+  if (st.size > 30e6) throw new Error('This diagram is too big to open here.');
+  const xml = await fsp.readFile(file, 'utf8');
+  const wc = e.sender;
+  unwatchDiagram(wc.id);
+  const onChange = (cur) => {
+    if (wc.isDestroyed()) return unwatchDiagram(wc.id);
+    if (cur.mtimeMs && cur.mtimeMs !== diagramWrote.get(file)) wc.send('diagram:changed', file);
+  };
+  fs.watchFile(file, { interval: 700 }, onChange);
+  diagramWatch.set(wc.id, { file, onChange });
+  return { xml, mtime: st.mtimeMs };
+});
+ipcMain.handle('diagrams:write', async (_e, p, xml) => {
+  const file = diagramFile(p);
+  xml = String(xml || '');
+  if (!/<mxfile[\s>]|<mxGraphModel[\s>]/.test(xml)) throw new Error('That does not look like a draw.io diagram.');
+  // keep the file as it was before the first change of this session (newest 10 kept per diagram)
+  if (!diagramBackedUp.has(file) && fs.existsSync(file)) {
+    diagramBackedUp.add(file);
+    const dir = path.join(app.getPath('userData'), 'diagram-backups');
+    await fsp.mkdir(dir, { recursive: true });
+    const base = path.basename(file, '.drawio');
+    await fsp.copyFile(file, path.join(dir, `${base}.${Date.now()}.drawio`)).catch(() => {});
+    const old = (await fsp.readdir(dir)).filter((f) => f.startsWith(base + '.') && f.endsWith('.drawio')).sort().reverse().slice(10);
+    for (const f of old) await fsp.unlink(path.join(dir, f)).catch(() => {});
+  }
+  await fsp.writeFile(file, xml, 'utf8');
+  const st = await fsp.stat(file);
+  diagramWrote.set(file, st.mtimeMs);
+  return st.mtimeMs;
+});
+ipcMain.handle('diagrams:close', (e) => unwatchDiagram(e.sender.id));
+ipcMain.handle('diagrams:open-external', (_e, p) => shell.openPath(diagramFile(p)));
+ipcMain.handle('diagrams:reveal', (_e, p) => shell.showItemInFolder(diagramFile(p)));
+
 // ---------- projects (spec: docs/workspace-spec.md) ----------
 async function listProjectsInfo() {
   const root = rootDir();
@@ -1311,6 +1430,7 @@ ipcMain.handle('projects:home', async (_e, name, markSeen) => {
     sources: brief?.sources || [],
     repos,
     past,
+    diagrams: project.repo ? (await projects.findFiles(project.repo, /\.drawio$/i, 4, 40)).map((f) => ({ path: f, name: path.basename(f).replace(/\.drawio$/i, ''), rel: path.relative(project.repo, f) })) : [],
     threads: threadList(name),
     seenAt,
   };
@@ -2135,6 +2255,7 @@ app.whenReady().then(async () => {
     await fsp.writeFile(path.join(rootDir(), 'Welcome to VibeNote.md'), fs.readFileSync(path.join(__dirname, 'welcome.md'), 'utf8'));
   }
   buildMenu();
+  serveDrawio();
   createWindow();
   watchRoot();
   app.on('activate', () => {

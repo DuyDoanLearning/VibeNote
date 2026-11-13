@@ -57,6 +57,23 @@ async function findRepos(root, maxDepth = 3, cap = 40) {
   return out;
 }
 
+// Files matching `re` under a folder (hidden and dependency folders skipped).
+async function findFiles(root, re, maxDepth = 4, cap = 50) {
+  const out = [];
+  async function scan(dir, depth) {
+    if (depth > maxDepth || out.length >= cap) return;
+    let ents;
+    try { ents = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (e.name.startsWith('.') || out.length >= cap) continue;
+      if (e.isDirectory()) { if (!SKIP.has(e.name)) await scan(path.join(dir, e.name), depth + 1); }
+      else if (re.test(e.name)) out.push(path.join(dir, e.name));
+    }
+  }
+  if (root) await scan(root, 0);
+  return out;
+}
+
 // Branch, last commit, uncommitted files, whether it has its own guide for Claude, commits since `since` (ms).
 async function repoInfo(repo, since) {
   const [branch, last, status, fresh] = await Promise.all([
@@ -108,4 +125,4 @@ function setSources(extra, list) {
   return lines.join('\n').trim();
 }
 
-module.exports = { BRIEF, BRIEF_TEMPLATE, findRepos, repoInfo, parseSources, setSources };
+module.exports = { BRIEF, BRIEF_TEMPLATE, findRepos, findFiles, repoInfo, parseSources, setSources };

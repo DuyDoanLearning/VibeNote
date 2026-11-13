@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: https: http:; font-src 'self' data:">
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: https: http:; font-src 'self' data:; frame-src vibe-drawio:">
   <title>VibeNote</title>
   <link rel="stylesheet" href="dist/katex/katex.min.css">
   <link rel="stylesheet" href="styles.css">
@@ -44,6 +44,13 @@
           </button>
         </div>
         <div id="apis"></div>
+        <div class="section-head">
+          <span>Diagrams</span>
+          <button id="diagram-add" class="mini" title="New diagram, or open a .drawio file">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+        <div id="diagrams"></div>
         <div class="section-head"><span>Status</span></div>
         <div id="statuses"></div>
         <div class="section-head"><span>Tags</span></div>
@@ -157,6 +164,7 @@
         <p class="empty-hint">or press <kbd>⌘K</kbd> to jump anywhere</p>
       </div>
       <div id="project-home"></div>
+      <div id="diagram-view"></div>
       <footer id="status"><span id="status-words"></span><span id="status-save"></span></footer>
     </main>
     <aside id="comments"></aside>

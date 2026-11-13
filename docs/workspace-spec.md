@@ -36,10 +36,25 @@ VibeNote is where the owner decides, reviews and keeps track; heavy code editing
 Code: `projects.js` (repos, git info, sources), threads + `projects:*` IPC in `main.js`, `src/project-ui.js`
 (sidebar, home, pickers), chat switcher in `src/agent-panel.js`.
 
-## Next steps (in the order agreed)
+## Step 2 — built (agent branch, 2026-11-13/14)
 
-2. **Draw.io viewer / editor**: open `.drawio` files in the embedded open-source draw.io editor; live refresh when
-   Claude edits the file.
+- **Diagrams**: `.drawio` files open in the full draw.io editor inside VibeNote (sidebar section *Diagrams*, the
+  *Diagrams* card on a project's home page, or *Open Diagram File…* for a file anywhere on the Mac).
+- Saves as you draw (the file as it was before the first change of a session is kept in
+  `userData/diagram-backups/`, newest 10 per diagram); reloads when the file changes on disk, e.g. when Claude
+  edits it. The Claude panel knows which diagram is open.
+- The editor is the open-source draw.io web app (Apache-2.0), **not in this repo**: `build.mjs` downloads the
+  pinned release once into `~/Library/Caches/VibeNote/`, checks its SHA-256 and unpacks a trimmed copy into
+  `dist/drawio` (~58 MB). It runs in a frame with its own origin (`vibe-drawio://`) and a policy that only lets it
+  load its own bundled files, so nothing in a diagram can leave the Mac.
+- Also since step 1: **each chat has its own model, effort and permission mode** (Settings holds the defaults);
+  clicking an earlier chat on the home page opens that chat (read it, or Continue it as a new project chat).
+
+Not done: rename / delete a diagram from inside VibeNote (use Finder), diagrams inside notes (embed / link),
+version history for diagrams, keyboard-shortcut clashes between VibeNote's menu and the editor are untested with
+real keys.
+
+## Next steps (in the order agreed)
 3. **Coding layout**: chat in the centre with the doc or diff beside it; review Claude's changes as a diff and
    comment on lines (same comment model as notes); read-only code viewer for `file:line` links; "Open in VS Code".
 4. **Spec watch**: when a followed Confluence page changes, show what changed and which code / API specs it
@@ -54,4 +69,8 @@ Code: `projects.js` (repos, git info, sources), threads + `projects:*` IPC in `m
   hand the task to T3 Code if it offers a way to start a thread from outside (not checked yet).
 - **Distill a chat** into a note (decisions + open questions, linked back to the chat).
 - **Trace chats**: read-only investigation across upstream/downstream repositories, saved as a note.
-- A chat's own model / mode (today they are shared settings).
+- **Project memory** (owner, 2026-11-13): what Claude learns in a project's chats is kept and reused (see ideas #17).
+- **Link local folders as context** (owner): attach any folder on the Mac to a project as read-only context.
+- **Codebase memory for agents** (owner): plug a code-indexing MCP server (the owner mentioned "codebase-memory")
+  into project chats so agents get codebase context quickly instead of re-reading files; e.g. a per-project switch
+  and index status on the home page. Note: VibeNote chats already load the MCP servers configured in Claude Code.
