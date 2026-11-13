@@ -1264,6 +1264,21 @@ ipcMain.handle('agent:thread-delete', (_e, notebook, id) => {
 // ---------- diagrams (draw.io files, edited in the bundled draw.io editor) ----------
 const DRAWIO_DIR = path.join(__dirname, 'dist', 'drawio');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.gif': 'image/gif', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.xml': 'text/xml; charset=utf-8', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.wasm': 'application/wasm' };
+// draw.io loads js/PostConfig.js last, as its place for local adjustments. Ours: with outside services off
+// (stealth) the editor swaps in a cramped "More Shapes" window; use the full one, which needs nothing from outside.
+const DRAWIO_PATCH = `
+;(function () {
+  if (typeof Menus === 'undefined' || typeof MoreShapesDialog === 'undefined') return;
+  var init = Menus.prototype.init;
+  Menus.prototype.init = function () {
+    init.apply(this, arguments);
+    var ui = this.editorUi;
+    ui.actions.put('shapes', new Action('moreShapes...', function () {
+      ui.showDialog(new MoreShapesDialog(ui, true).container, 680, 480, true, true);
+    }));
+  };
+})();
+`;
 function serveDrawio() {
   protocol.handle('vibe-drawio', async (req) => {
     const rel = decodeURIComponent(new URL(req.url).pathname).replace(/^\/+/, '') || 'index.html';
@@ -1274,7 +1289,8 @@ function serveDrawio() {
       const headers = { 'content-type': MIME[ext] || 'application/octet-stream' };
       // The editor may only load its own bundled files: nothing in a diagram can be sent anywhere.
       if (ext === '.html') headers['content-security-policy'] = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' data: blob:; form-action 'none'";
-      return new Response(await fsp.readFile(file), { headers });
+      const data = await fsp.readFile(file);
+      return new Response(rel === 'js/PostConfig.js' ? Buffer.concat([data, Buffer.from(DRAWIO_PATCH)]) : data, { headers });
     } catch {
       return new Response('not found', { status: 404 });
     }

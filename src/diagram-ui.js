@@ -42,8 +42,9 @@ export function createDiagramUI(ctx) {
     dark = isDark();
     frame = document.createElement('iframe');
     frame.className = 'dg-frame';
-    // embed + JSON messages; stealth/offline: no outside services; we save automatically, so no Save/Exit buttons
-    frame.src = `vibe-drawio://app/index.html?embed=1&proto=json&spin=1&offline=1&stealth=1&pwa=0&libraries=1&noSaveBtn=1&noExitBtn=1&saveAndExit=0&lang=en&dark=${dark ? 1 : 0}`;
+    // embed + JSON messages; stealth: no outside services (the frame's policy blocks them anyway); we save
+    // automatically, so no Save/Exit buttons. Not "offline=1": that mode swaps in cramped dialogs (e.g. More Shapes).
+    frame.src = `vibe-drawio://app/index.html?embed=1&proto=json&spin=1&stealth=1&pwa=0&libraries=1&noSaveBtn=1&noExitBtn=1&saveAndExit=0&lang=en&dark=${dark ? 1 : 0}`;
     body.append(frame);
   }
 

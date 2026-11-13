@@ -49,6 +49,8 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 ## Diagrams (agent branch)
 - `.drawio` files are **not notes**: `src/diagram-ui.js` shows them in a third main-area state (`S.diagram`, `body.diagram-open`) next to "note" and "project home". IPC `diagrams:*` in main.js; `diagramFile()` only allows files in the notes folder, a linked project folder, or picked by the user (`config.recentDiagrams`).
 - The draw.io web app is downloaded by `build.mjs` (pinned version + SHA-256, cached in `~/Library/Caches/VibeNote/`), trimmed, and served from `dist/drawio` through the `vibe-drawio://` protocol with a CSP that blocks all outside requests. To update draw.io: change `DRAWIO.version` and `sha256` in build.mjs, rebuild, and re-run a diagram test (check for missing files).
+- The editor runs with `stealth=1` (no outside services). In that mode draw.io shows cramped dialogs, so `DRAWIO_PATCH` in main.js is appended to `js/PostConfig.js` when served (currently: the full "More Shapes" window). Don't use `offline=1`. Add further fixes of that kind there.
+- Claude editing an open diagram was verified live (Edit on the .drawio file → Allow card → the editor reloads).
 - Embed protocol: `?embed=1&proto=json`; the frame posts `init` / `autosave` / `save`, VibeNote posts `load` / `status`. Test trick: `win.webContents.mainFrame.framesInSubtree` finds the frame; post a fake `autosave` from inside it.
 
 ## Commands
