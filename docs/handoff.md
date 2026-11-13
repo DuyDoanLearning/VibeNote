@@ -1,4 +1,4 @@
-# Hand-over — status after the 2026-11-13 session (`agent` branch)
+# Hand-over — status after the 2026-11-13/14 sessions (`agent` branch)
 
 A note for Claude picking this up in another session or on another Mac. Read `CLAUDE.md` first (owner, workflow,
 branches, testing rules), then this. The repo is **public**: never put work content (Confluence site name, page
@@ -53,9 +53,13 @@ diagram renders). Real keyboard shortcuts inside the editor could not be tested 
 ## Setting up on another Mac
 
 1. `git fetch --all --tags && git checkout agent && npm install`, then `sh scripts/install-version.sh agent`.
+   The first build downloads the draw.io editor (~50 MB, from the draw.io GitHub releases) into
+   `~/Library/Caches/VibeNote/`; without it everything works except opening diagrams.
 2. Claude Code must be installed and logged in (`claude` once in Terminal).
-3. In VibeNote: link the project notebooks to their code folders again (Claude panel → ⋯ → Link a Code Folder) —
-   links are per machine (`config.projects`).
+3. In VibeNote: link each project to its code folder again (the project's home page → *Link a code folder*, or
+   Claude panel → ⋯) — links are per machine (`config.projects`). Chats, "last looked" times and diagram backups
+   are per machine too. A project itself (its notebook and `Project brief.md` with the document list) travels with
+   the notes folder.
 4. Atlassian: the first Fetch opens a browser sign-in (main connection). Pictures need a second, separate sign-in
    (newer server). Both are stored encrypted in the Keychain on that Mac only.
 5. T3 Code threads only show if T3 Code is installed on that Mac.

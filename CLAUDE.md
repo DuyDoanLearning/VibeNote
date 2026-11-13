@@ -2,14 +2,21 @@
 
 Markdown note-taking app for macOS (Electron), built by Claude with and for the repo owner, who uses it every day as their main Markdown app. See README.md for features, data layout and the file map.
 
+## Where things stand (updated 2026-11-14)
+- **Stable = `v1.1.0-stable` on `main`**: notes, Claude panel, Confluence, API specs.
+- **`agent` branch = the owner's daily build right now**: Projects workspace steps 1–3 (projects + home page + multi-repo workspace + several chats per project; draw.io diagrams; coding layout with Changes review, line comments for Claude and a file viewer). All committed, pushed and installed on the owner's main Mac. The owner is trying them for real; expect feedback and small fixes before the next step.
+- **Next agreed step: 4, spec watch** (a followed Confluence page changes → what changed and which code / API specs it affects), then 5, Figma → API proposal. Owner's newer ideas (context bridge to T3 Code / a terminal `claude`, "Build this" button on a spec, project memory, local folders as context, a codebase-memory MCP server) are in `docs/workspace-spec.md` → "Ideas attached to this spec" and `docs/ideas.md`. Ask which they want before starting something big.
+- The owner keeps a plain-language backlog note in their notes, "Workspace backlog" (they moved it to the Inbox; find it by title, don't assume a notebook). Keep it in step with `docs/` when a step is finished: tick the step and add a short "how to try it".
+
 ## Read this first (continuing on another machine or session)
 0. **Latest status lives on the `agent` branch in `docs/handoff.md`** (what was built, how to test, what's pending) — read it with `git show origin/agent:docs/handoff.md` even if you work on `main`.
-1. `git fetch --all --tags` — work happens on two branches (see *Branches*); check which one the owner wants.
-2. `npm install` (Node 20+), then `npm run smoke` to confirm the build works without touching real notes.
+1. `git fetch --all --tags && git checkout agent` — new work happens on `agent` (see *Branches*); `main` only gets fixes and docs.
+2. `npm install` (Node 20+), then `npm run smoke` to confirm the build works without touching real notes. The first build on `agent` downloads the draw.io editor (~50 MB from GitHub, cached in `~/Library/Caches/VibeNote/`); if that fails the app still builds, only diagrams won't open. To put the build on that Mac: `sh scripts/install-version.sh agent`.
 3. Read **`docs/handoff.md`** (latest status, how to test, what's pending), then `docs/workspace-spec.md` (the current experiment: Projects), `docs/agent-spec.md`, `docs/confluence-spec.md` and `docs/ideas.md` (backlog + owner's top picks).
 4. Machine-specific things are **not** in the repo: the notes folder (default `~/Documents/VibeNotes`), settings / chat history / version history (`~/Library/Application Support/VibeNote/`), and project links (notebook → code folder, `config.projects`). On a new Mac, relink the "VibeNote Dev" notebook to this repo from the Claude panel (⋯ → Link a Code Folder).
 
 ## The owner and how to work with them
+- Friendly and informal (calls Claude "Bob" / "my friend"). Sends short messages and screenshots; when a report is vague, reproduce it with real clicks in an isolated profile first, then ask in plain text (they dismiss question dialogs).
 - Not deep into the code; worried about losing track of AI-written code. Explain in **plain, friendly, non-jargon language**, keep summaries short, and say what changed and why.
 - Values a **stable** Markdown app above all; experiments must not break it (hence the branches, tag and rollback script).
 - Liked: Inkdrop-style experience (left-aligned, tight spacing, explicit title field), VS Code themes, keyboard-driven editing. **Never mention "Inkdrop" in anything public in this repo** (README, docs, code comments, GitHub description).
@@ -34,7 +41,7 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - `src-main/agent.js` uses `@anthropic-ai/claude-agent-sdk` with `pathToClaudeCodeExecutable` = the user's installed `claude`, so it runs on their Claude login (ANTHROPIC_API_KEY is stripped from the child env on purpose). Owner's decision: internal use only; switch to API-key auth before distributing to others.
 - Bundled by esbuild into `dist/agent.mjs` (the SDK's 300 MB platform binary is not shipped) and imported lazily by `main.js`. All npm packages are devDependencies because everything is bundled; the packaged app ships no `node_modules`.
 - Login-shell env is read once (`zsh -ilc env`) because GUI apps don't get the user's PATH.
-- One chat per project (top-level notebook) in streaming-input mode; transcripts in `userData/agent-chats/`; resumed via the saved session id.
+- Chats run in streaming-input mode; transcripts in `userData/agent-chats/`; resumed via the saved session id. A project can have several chats (see *Projects workspace*).
 - `canUseTool` → IPC → Allow/Deny cards in `src/agent-panel.js`; AskUserQuestion answers go back as `updatedInput.answers`; ExitPlanMode shows the plan with Approve.
 - `systemPromptFor` in main.js defines the note-driven conventions: plans as checklists, tick steps when done, a "Change log" note entry per commit, a "Codebase map" note.
 - Known limitation: if the user has unsaved typing in a note while Claude edits the same note, the user's text wins on save.
