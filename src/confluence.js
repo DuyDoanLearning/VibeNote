@@ -415,6 +415,24 @@ function convertRegion(text, side, replaced, opts = {}) {
     panel.append(...bq.childNodes);
     bq.replaceWith(panel);
   }
+  // A plain list as lines for inside a to-do item: <br>• text, nested ones indented.
+  function flattenList(doc, list, depth) {
+    const out = [];
+    let i = 0;
+    for (const li of [...list.children].filter((x) => x.tagName === 'LI')) {
+      i++;
+      const bullet = list.tagName === 'OL' ? `${i}. ` : depth ? '◦ ' : '• ';
+      out.push(doc.createElement('br'), doc.createTextNode('\u00a0\u00a0'.repeat(depth) + bullet));
+      const nested = [];
+      for (const c of [...li.childNodes]) {
+        if (c.nodeType === 1 && (c.tagName === 'UL' || c.tagName === 'OL')) nested.push(c);
+        else if (c.nodeType === 1 && c.tagName === 'P') out.push(...c.childNodes);
+        else if (!(c.nodeType === 1 && c.tagName === 'INPUT')) out.push(c);
+      }
+      for (const n of nested) out.push(...flattenList(doc, n, depth + 1));
+    }
+    return out;
+  }
   // - [ ] tasks → Confluence task lists
   for (const ul of [...body.querySelectorAll('ul')].reverse()) {
     const items = [...ul.children].filter((li) => li.tagName === 'LI');
@@ -427,8 +445,12 @@ function convertRegion(text, side, replaced, opts = {}) {
       if (p) { p.replaceWith(...p.childNodes); }
       li.setAttribute('data-type', 'task-item');
       box.removeAttribute('disabled');
-      // Nested lists go after the item, inside the parent task list (Confluence's nesting rule).
-      for (const sub of [...li.querySelectorAll(':scope > ul, :scope > ol')]) li.after(sub);
+      // Nested to-do lists go after the item, inside the parent task list (Confluence's nesting rule). A to-do item
+      // can't hold an ordinary list, so plain sub-bullets become extra lines in the item ("• Dev: …").
+      for (const sub of [...li.querySelectorAll(':scope > ul, :scope > ol')].reverse()) {
+        if (sub.getAttribute('data-type') === 'task-list') li.after(sub);
+        else { li.append(...flattenList(doc, sub, 0)); sub.remove(); }
+      }
       if (box.nextSibling?.nodeType === 3) box.nextSibling.textContent = ' ' + box.nextSibling.textContent.replace(/^\s+/, '');
     }
   }

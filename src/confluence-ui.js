@@ -311,9 +311,11 @@ export function createConfluenceUI(ctx) {
       const where = container ? n.notebook : `${n.notebook}/${safeSeg(n.title)}`; // the notebook its children live in
       out.push({ value: `page:${n.path}`, label: n.title, sort: where, depth: where.split('/').length - 2, icon: '📄', note: n });
     }
+    // Where a page sits in the tree: a page with sub-pages lives inside its own notebook, so it sits in the one above.
+    const placedIn = (n) => (leafOf(n.notebook) === safeSeg(n.title) && n.notebook !== CONFLUENCE_ROOT ? n.notebook.slice(0, n.notebook.lastIndexOf('/')) : n.notebook);
     for (const nb of S.notebooks.filter((x) => x.startsWith(CONFLUENCE_ROOT + '/'))) {
       if (pages.some((n) => n.notebook === nb && leafOf(nb) === safeSeg(n.title))) continue; // that's a page's own notebook
-      const sibling = pages.find((n) => n.notebook === nb);
+      const sibling = pages.find((n) => placedIn(n) === nb); // any page directly under this folder tells us the folder's id
       if (!sibling) continue;
       out.push({ value: `folder:${nb}`, label: leafOf(nb), sort: nb, depth: nb.split('/').length - 2, icon: '📁', nb, sibling });
     }
