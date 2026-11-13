@@ -173,16 +173,32 @@ export async function listTools(server = 'main') {
 
 /** Run a read-only operation on the newer server (it exposes most operations through executeRead). */
 export async function read(name, cloudId, inputs, { interactive = false } = {}) {
-  await connect({ server: 'files', interactive });
+  try { await connect({ server: 'files', interactive }); } catch (e) { throw friendly(e); }
   const r = await call('executeRead', { name, cloudId, inputs }, 'files');
   return r?.data ?? r;
 }
 
+// A company network that inspects HTTPS re-signs Atlassian's connection with its own certificate. If the Mac doesn't
+// trust that certificate, Node can't verify Atlassian: say so plainly (never switch verification off).
+const CERT_CODES = /SELF_SIGNED_CERT_IN_CHAIN|DEPTH_ZERO_SELF_SIGNED_CERT|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT|CERT_UNTRUSTED/;
+function friendly(e) {
+  const code = e?.cause?.code || e?.code || e?.cause?.cause?.code || '';
+  if (CERT_CODES.test(code) || CERT_CODES.test(String(e?.message || ''))) {
+    return new Error('Your network is inspecting secure connections (a company proxy), so VibeNote can’t verify it’s really talking to Atlassian. Use another network (home Wi-Fi, phone hotspot) or VPN — or ask IT to install the proxy’s certificate on this Mac.');
+  }
+  if (/fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ECONNRESET/.test(`${e?.message} ${code}`)) {
+    return new Error(`Can’t reach Atlassian (${code || 'network error'}). Check your internet connection.`);
+  }
+  return e;
+}
+
 /** Call an Atlassian MCP tool; returns parsed JSON when the tool answers with JSON text. */
 export async function call(name, args, server = 'main') {
-  const c = await connect({ server });
+  let c;
+  try { c = await connect({ server }); } catch (e) { throw friendly(e); }
   // Big pages can take Atlassian over a minute (the SDK's default timeout).
-  const res = await c.callTool({ name, arguments: args }, undefined, { timeout: 150_000 });
+  let res;
+  try { res = await c.callTool({ name, arguments: args }, undefined, { timeout: 150_000 }); } catch (e) { throw friendly(e); }
   const text = (res.content || []).filter((p) => p.type === 'text').map((p) => p.text).join('\n');
   if (res.isError) throw new Error(text || `${name} failed`);
   try { return JSON.parse(text); } catch { return text; }

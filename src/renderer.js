@@ -691,6 +691,9 @@ function makeDropTarget(node, notebook) {
     e.preventDefault();
     const n = S.notes.find((x) => x.path === p);
     if (n?.trashed) return toast('Restore the note first');
+    if ((notebook === CONFLUENCE_ROOT || notebook.startsWith(CONFLUENCE_ROOT + '/')) && n && !confluenceInfo(n.meta) && n.kind !== 'api') {
+      return confluence.publishNote(n, notebook); // becomes a Confluence page there (the window asks before publishing)
+    }
     moveNote(p, notebook);
   });
 }
@@ -1048,7 +1051,10 @@ function renderToolbar() {
   sel.disabled = !n || n.trashed;
   $('#back-btn').disabled = !S.back.length;
   $('#fwd-btn').disabled = !S.forward.length;
-  $('#push-btn').hidden = !n || !!n.trashed || confluenceInfo(S.meta)?.kind !== 'page';
+  // Push: update the Confluence page — or, for a normal note, publish it as a new page.
+  const cfKind = confluenceInfo(S.meta)?.kind;
+  $('#push-btn').hidden = !n || !!n.trashed || n.kind === 'api' || (cfKind && cfKind !== 'page');
+  $('#push-btn').title = cfKind ? 'Push your changes to Confluence' : 'Publish this note as a new Confluence page';
   $('#pin-btn').classList.toggle('on', !!S.meta?.pinned);
   $('#pin-btn').title = S.meta?.pinned ? 'Unpin note (⌥⌘P)' : 'Pin note (⌥⌘P)';
   $$('#modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === S.mode));
@@ -1289,6 +1295,10 @@ async function moreMenu() {
       { id: 'confluence-push', label: 'Push to Confluence…' },
       { id: 'confluence-pull', label: 'Pull Latest from Confluence' },
       { id: 'confluence-open', label: 'Open in Confluence' },
+    ] : []),
+    ...(!confluenceInfo(S.meta) && !isApi() ? [
+      { type: 'separator' },
+      { id: 'confluence-publish', label: 'Publish as a New Confluence Page…' },
     ] : []),
     { type: 'separator' },
     { id: 'export-html', label: 'Export as HTML…' },
@@ -1637,6 +1647,7 @@ const COMMANDS = [
   { id: 'empty-trash', title: 'Empty Trash', run: emptyTrash },
   { id: 'confluence-fetch', title: 'Fetch from Confluence…', when: () => !SINGLE, run: () => confluence.openFetch() },
   { id: 'confluence-push', title: 'Push to Confluence…', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.push() },
+  { id: 'confluence-publish', title: 'Publish as a New Confluence Page…', when: () => !isTrashed() && !!currentNote() && !confluenceInfo(S.meta) && !isApi(), run: () => confluence.publishNote() },
   { id: 'confluence-pull', title: 'Pull Latest from Confluence', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.pull() },
   { id: 'confluence-open', title: 'Open in Confluence', when: () => !!confluenceInfo(S.meta), run: () => confluence.openInConfluence() },
   { id: 'confluence-pictures', title: 'Get Pictures from Confluence (images, draw.io)', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.downloadPictures() },
@@ -1705,7 +1716,7 @@ function bindUI() {
   $('#add-notebook').addEventListener('click', () => newNotebook());
   $('#cf-fetch').addEventListener('click', () => confluence.openFetch());
   $('#api-add').addEventListener('click', () => { setFilter({ type: 'notebook', name: API_ROOT }); newNote(undefined, 'api'); });
-  $('#push-btn').addEventListener('click', () => confluence.push());
+  $('#push-btn').addEventListener('click', () => (confluenceInfo(S.meta) ? confluence.push() : confluence.publishNote()));
   $('#comments-btn').addEventListener('click', () => comments.toggle());
   $('#folder-btn').addEventListener('click', chooseFolder);
   $('#new-note').addEventListener('click', () => newNote());

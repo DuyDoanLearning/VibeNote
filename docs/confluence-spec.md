@@ -66,6 +66,8 @@ Per-note sync info is kept in front matter (plain file, syncable): `confluence: 
 - [x] **3. Push.** (2026-11-13: tested on a private scratch page — edits arrive, untouched blocks byte-identical, conflict refused.) "Push to Confluence" button: shows what will change, changes only edited blocks, stops if the page version changed, option "save as Confluence draft". "Pull latest" to refresh a note.
 - [ ] **4. Claude panel.** Claude knows the protected-block rules and doesn't break them.
 - [ ] **5. Extras.** Live Jira chips, comments panel (read-only), new Confluence page from a note.
+  - [x] New page from a note: Push on a normal note (pick a fetched page/folder or paste a link) or drag a note onto a Confluence notebook → `createConfluencePage` under that parent (a folder's id comes from a page inside it), then the note moves into the Confluence tree and is re-fetched so it's linked (front matter + sidecar). Publish only (no draft) for new pages.
+  - Network: on a company network that re-signs HTTPS with an untrusted proxy certificate, Atlassian calls fail; VibeNote trusts the Mac's certificates and says so plainly (never disables verification).
 - Later: 3-way merge when the page changed in Confluence (we have the base copy), a "changed since fetch" dot in the note list, keep Confluence's page order in the note list, Jira lists in a note, create Jira tickets from a checklist, open a Jira ticket as a note, @mention autocomplete, move pages by dragging, replying to comments.
 
 ## Safety rules while building

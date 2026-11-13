@@ -10,6 +10,8 @@ const ICONS = { page: '📄', folder: '📁', whiteboard: '🧩', database: '�
 
 export function createConfluenceUI(ctx) {
   const { api, S, $, el, esc, overlay, closeOverlay, toast, save, refresh, setFilter, openNote, currentNote, editorText, resolveLink, rerender } = ctx;
+  const leafOf = (nb) => nb.slice(nb.lastIndexOf('/') + 1);
+  const inBook = (n, nb) => n.notebook === nb || n.notebook.startsWith(nb + '/');
   const cf = api.confluence;
 
   const pageUrl = (site, spaceKey, id, type = 'page') => {
@@ -299,6 +301,128 @@ export function createConfluenceUI(ctx) {
     $('[data-act=publish]', ov).addEventListener('click', () => go(false));
   }
 
+  // ---------- Publish a note as a new Confluence page ----------
+  // Places the new page can go: fetched pages, and Confluence folders (notebooks without a page of their own).
+  function locations() {
+    const pages = S.notes.filter((n) => !n.trashed && inBook(n, CONFLUENCE_ROOT) && confluenceInfo(n.meta)?.kind === 'page');
+    const out = [];
+    for (const n of pages) {
+      const container = leafOf(n.notebook) === safeSeg(n.title) && n.notebook !== CONFLUENCE_ROOT;
+      const where = container ? n.notebook : `${n.notebook}/${safeSeg(n.title)}`; // the notebook its children live in
+      out.push({ value: `page:${n.path}`, label: n.title, sort: where, depth: where.split('/').length - 2, icon: '📄', note: n });
+    }
+    for (const nb of S.notebooks.filter((x) => x.startsWith(CONFLUENCE_ROOT + '/'))) {
+      if (pages.some((n) => n.notebook === nb && leafOf(nb) === safeSeg(n.title))) continue; // that's a page's own notebook
+      const sibling = pages.find((n) => n.notebook === nb);
+      if (!sibling) continue;
+      out.push({ value: `folder:${nb}`, label: leafOf(nb), sort: nb, depth: nb.split('/').length - 2, icon: '📁', nb, sibling });
+    }
+    return out.sort((a, b) => a.sort.localeCompare(b.sort, undefined, { numeric: true, sensitivity: 'base' }));
+  }
+
+  // The location a notebook in the Confluence section stands for (for drag & drop).
+  function locationForNotebook(nb) {
+    return locations().find((l) => (l.nb && l.nb === nb) || (l.note && leafOf(l.note.notebook) === safeSeg(l.note.title) && l.note.notebook === nb)) || null;
+  }
+
+  async function publishNote(note = currentNote(), presetNotebook = null) {
+    if (!note || note.trashed || note.kind === 'api') return;
+    const info = confluenceInfo(note.meta);
+    if (info) { if (note.path === S.current) return push(); return toast('This note is already a Confluence page — open it and use Push.'); }
+    if (note.path === S.current) await save();
+    const fresh = S.notes.find((n) => n.path === note.path) || note;
+    const body = note.path === S.current ? editorText() : fresh.body;
+    let r;
+    try { r = toConfluence(body, { blocks: [] }, { resolveLink }); } catch (e) { return toast('Could not prepare the page: ' + errText(e)); }
+    const locs = locations();
+    const preset = presetNotebook ? locationForNotebook(presetNotebook) : null;
+
+    const ov = overlay('modal-ov');
+    ov.innerHTML = `
+      <div class="modal cf-push cf-publish">
+        <h2>Publish to Confluence</h2>
+        <p class="cf-lead">“${esc(fresh.title || 'Untitled')}” becomes a new Confluence page.</p>
+        <label class="cf-label">Put it under</label>
+        <select class="cf-loc"></select>
+        <input class="cf-url cf-parent-url" type="url" spellcheck="false" placeholder="…or paste the link of the page it should go under" hidden>
+        <ul class="cf-summary">
+          <li>📄 ${r.added ? `${body.split('\n').filter((l) => l.trim()).length} lines of content` : 'An empty page'}${fresh.meta.tags.length ? ' (tags stay in VibeNote)' : ''}.</li>
+          <li>🔗 Afterwards the note moves into your Confluence notebooks and stays linked: edit it here and use <b>Push</b> to update the page.</li>
+          ${r.problems.map((p) => `<li class="warn">⚠️ ${esc(p)}</li>`).join('')}
+        </ul>
+        <p class="cf-note">Everyone who can see the parent page will see the new page.</p>
+        <div class="cf-msg"></div>
+        <div class="actions">
+          <button class="btn" data-act="close">Cancel</button>
+          <button class="btn primary" data-act="publish">Publish</button>
+        </div>
+      </div>`;
+    const sel = $('.cf-loc', ov);
+    const urlIn = $('.cf-parent-url', ov);
+    const msg = $('.cf-msg', ov);
+    sel.append(new Option(locs.length ? 'Choose a page or folder…' : 'No fetched pages yet — paste a link below', ''));
+    for (const l of locs) sel.append(new Option(`${'\u00a0\u00a0\u00a0\u00a0'.repeat(Math.max(0, l.depth))}${l.icon} ${l.label}`, l.value));
+    sel.append(new Option('🔗 Paste a page link…', 'url'));
+    sel.value = preset ? preset.value : '';
+    const sync = () => { urlIn.hidden = sel.value !== 'url' && !!locs.length; if (!urlIn.hidden) urlIn.focus(); };
+    if (!locs.length) sel.value = 'url';
+    sync();
+    sel.addEventListener('change', sync);
+    $('[data-act=close]', ov).addEventListener('click', closeOverlay);
+    const btn = $('[data-act=publish]', ov);
+    btn.addEventListener('click', async () => {
+      // Where: a fetched page, a folder (via a page in it), or a pasted link.
+      let site, parentId, siblingId, target = CONFLUENCE_ROOT, spaceKey = '', parentNote = null;
+      const loc = locs.find((l) => l.value === sel.value);
+      if (loc?.note) {
+        const i = confluenceInfo(loc.note.meta);
+        site = i.site; parentId = i.id; parentNote = loc.note;
+        spaceKey = /\/spaces\/([^/]+)/.exec(i.url)?.[1] || '';
+      } else if (loc?.nb) {
+        const i = confluenceInfo(loc.sibling.meta);
+        site = i.site; siblingId = i.id; target = loc.nb;
+        spaceKey = /\/spaces\/([^/]+)/.exec(i.url)?.[1] || '';
+      } else {
+        const m = /^https:\/\/([^/]+\.atlassian\.net)\/wiki\/.*?(?:\/pages\/(?:edit-v2\/|edit\/)?(\d+)|[?&]pageId=(\d+))/.exec(urlIn.value.trim());
+        if (!m) { msg.className = 'cf-msg error'; msg.textContent = 'Choose a location, or paste a Confluence page link (…atlassian.net/wiki/…/pages/123…).'; return; }
+        site = m[1]; parentId = m[2] || m[3];
+        spaceKey = /\/spaces\/([^/]+)/.exec(urlIn.value)?.[1] || '';
+      }
+      btn.disabled = true;
+      sel.disabled = urlIn.disabled = true;
+      msg.className = 'cf-msg wait';
+      msg.textContent = (await cf.status()) ? 'Publishing…' : 'Signing in to Atlassian… a browser tab opened. Sign in there and click Accept, then come back.';
+      try {
+        const title = fresh.meta.title || fresh.title || 'Untitled';
+        const created = await cf.create({ site, parentId, siblingId, title, html: r.html });
+        msg.textContent = 'Published. Linking the note…';
+        // The note's new home: the parent page's notebook (a page that gets its first child gets its own notebook).
+        if (parentNote) {
+          const container = leafOf(parentNote.notebook) === safeSeg(parentNote.title) && parentNote.notebook !== CONFLUENCE_ROOT;
+          target = container ? parentNote.notebook : `${parentNote.notebook}/${safeSeg(parentNote.title)}`;
+          if (!container) {
+            await cf.mkdir(target);
+            await api.move(parentNote.path, target);
+          }
+        } else if (!loc) {
+          await cf.mkdir(CONFLUENCE_ROOT).catch(() => {});
+        }
+        const moved = fresh.notebook === target ? fresh.path : await api.move(fresh.path, target);
+        await refresh();
+        const p = await fetchPage({ site, spaceKey, id: created.id, notebook: target, existing: moved });
+        closeOverlay();
+        await refresh();
+        await openNote(p);
+        toast('Published to Confluence. The note is now linked to the new page.', 4000);
+      } catch (e) {
+        msg.className = 'cf-msg error';
+        msg.textContent = 'Publish failed: ' + errText(e);
+        btn.disabled = false;
+        sel.disabled = urlIn.disabled = false;
+      }
+    });
+  }
+
   // ---------- Pull latest ----------
   async function pull() {
     const note = currentNote();
@@ -394,6 +518,8 @@ export function createConfluenceUI(ctx) {
     openFetch,
     push,
     pull,
+    publishNote,
+    locationForNotebook,
     decorate,
     downloadPictures,
     info: () => confluenceInfo(S.meta),

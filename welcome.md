@@ -28,6 +28,7 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - Click **+** next to **Confluence** in the sidebar, paste a page link, tick the pages you want and **Fetch**. Sub-pages become notebooks.
 - Edit the note, then click **Push** to send your changes back. Only the parts you changed are updated; diagrams, macros and images (the 🔒 boxes) stay as they are.
 - If someone changed the page in Confluence meanwhile, Push stops. Use **Pull Latest from Confluence** (⌘K) to refresh.
+- **Publish a note as a new page:** on any normal note, click **Push** and choose where it goes (one of your fetched pages or folders, or paste a page link) — or drag the note onto a page or folder in the **Confluence** section of the sidebar. After **Publish** the note moves into your Confluence notebooks and stays linked; Push then updates it.
 - **Pictures** (images and draw.io diagrams): click **Show pictures from Confluence** in a 🔒 box, or ⌘K → *Get Pictures from Confluence*. The first time, Atlassian asks you to sign in once more (click Accept). After that, pictures update by themselves when you fetch or pull. Click a picture to open it full size.
 
 ## Ask Claude to write

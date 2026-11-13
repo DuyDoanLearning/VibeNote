@@ -781,3 +781,10 @@ body.api-note #status-pick, body.api-note #tag-list, body.api-note #tag-input, b
 .cw-chat.on { color: var(--accent); }
 .cw-chat:hover { text-decoration: underline; }
 .cw-chat { margin-left: 5px; }
+
+/* Publish a note as a new Confluence page */
+.cf-publish .cf-lead { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+.cf-label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 5px; }
+.cf-loc { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 13px; }
+.cf-parent-url { width: 100%; margin-top: 8px; box-sizing: border-box; }
+.cf-publish .cf-summary { margin-top: 14px; }

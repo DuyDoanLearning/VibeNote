@@ -16,6 +16,17 @@ const os = require('os');
 const { pathToFileURL } = require('url');
 const themes = require('./themes');
 const claudeChats = require('./claude-chats');
+
+// Also trust the certificates the Mac trusts (like browsers do): on a company network whose proxy re-signs HTTPS with
+// a certificate IT installed on the Mac, Atlassian / Swagger requests then work instead of failing. Never turns checks off.
+try {
+  const tls = require('tls');
+  if (tls.getCACertificates && tls.setDefaultCACertificates) {
+    tls.setDefaultCACertificates([...new Set([...tls.getCACertificates('bundled'), ...tls.getCACertificates('system')])]);
+  }
+} catch (e) {
+  console.warn('system certificates not loaded:', e.message);
+}
 const { execFile } = require('child_process');
 
 const isMac = process.platform === 'darwin';
@@ -1285,6 +1296,20 @@ ipcMain.handle('confluence:push', async (_e, { site, id, title, html, version, d
     status: draft ? 'draft' : 'current', versionMessage: 'Edited in VibeNote',
   });
   return { ok: true, version: r?.version?.number || null };
+});
+
+// New Confluence page from a note. Parent = a page (parentId), or the parent of a known page (siblingId — used for
+// Confluence folders, whose ids aren't kept locally). The space comes from that page.
+ipcMain.handle('confluence:create', async (_e, { site, parentId, siblingId, title, html }) => {
+  const atl = await loadAtlassian();
+  const ref = await atl.call('getConfluencePage', { cloudId: site, pageId: String(parentId || siblingId), contentFormat: 'markdown' });
+  const parent = parentId ? String(parentId) : String(ref.parentId || '');
+  if (!parent) throw new Error('Couldn’t find where that page lives in Confluence. Pick a page as the location instead.');
+  const r = await atl.call('createConfluencePage', {
+    cloudId: site, spaceId: String(ref.spaceId), parentId: parent, title, body: html, contentFormat: 'html',
+  });
+  if (!r?.id) throw new Error('Confluence didn’t create the page.');
+  return { id: String(r.id), version: r.version?.number || 1, parentId: parent };
 });
 
 // ---------- comments (highlight → comment → @Claude replies) ----------
