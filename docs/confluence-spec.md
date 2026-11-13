@@ -13,7 +13,7 @@ Work documents live in Confluence. Today that means copy-pasting between Conflue
 - [x] **Scope of v1: pages, folders and the nested tree.** Whiteboards and databases are only links.
 - [x] **v1 extras:** natural matches (see below), live Jira chips, a comments panel, and "new Confluence page from a note".
 
-## What we learned from a real page (AI Services Architecture, space VV)
+## What we learned from a real work page
 
 Atlassian's own Markdown export is **lossy**. It reports `lossyConversion: true`; draw.io diagrams and dates disappear, multi-paragraph table cells get glued together, lists in cells are flattened, and the automatic row numbers become a real column. **Never push that Markdown back.**
 
