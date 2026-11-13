@@ -788,3 +788,7 @@ body.api-note #status-pick, body.api-note #tag-list, body.api-note #tag-input, b
 .cf-loc { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 13px; }
 .cf-parent-url { width: 100%; margin-top: 8px; box-sizing: border-box; }
 .cf-publish .cf-summary { margin-top: 14px; }
+
+/* Inline suggestions (grey text after the cursor) */
+.cm-ghost { color: var(--faint); opacity: .75; font-style: italic; pointer-events: none; }
+.cm-ghost-key { font: 600 9.5px var(--sans); font-style: normal; color: var(--faint); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; }

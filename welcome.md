@@ -33,6 +33,8 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 
 ## Ask Claude to write
 
+- **Inline suggestions:** pause at the end of a line and Claude suggests how to continue, in grey. **Tab** accepts, **Esc** dismisses, or just keep typing. Turn it off or pick its model in Settings → Claude.
+
 - Type **/claude** on a new line (or press **⇧⌘J**) and ask for something: a table, a checklist, a summary, a diagram… Claude's Markdown appears as it's written; click **Insert** to add it.
 - Select text first and press **⇧⌘J** to have Claude rewrite it (**Replace**). Type a new request in the box to adjust the result.
 - /claude and @Claude comments also know what you discussed in the **Claude panel** for that project (decisions, names, preferences). The box shows “+ your Claude chat (N messages)” — click it to turn that off.
@@ -60,6 +62,7 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 
 - The Claude panel shows what Claude is doing, like Claude Code in Terminal: its **thinking** (live, then folded into "✻ Thought for 5s"), each **step** as it starts (with a short result such as "→ 120 lines" or "→ +3 −1"), to-do lists, helper agents' progress, and a status line with time and tokens.
 - Click a step to see the details — edits show as a red/green diff.
+- Press **Esc** in the Claude panel to stop Claude while it works.
 - Type **/** in the Claude panel for commands: **/model** (switch model — or click the model button at the top), **/effort**, **/usage** (plan limits and what the chat cost), **/context**, **/clear**, **/chats**, **/mcp**, **/help** — plus all your Claude Code commands and skills (/compact, /init, /code-review…).
 
 ## Your past Claude chats

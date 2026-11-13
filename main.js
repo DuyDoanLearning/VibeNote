@@ -95,6 +95,10 @@ const DEFAULT_SETTINGS = {
   agentModel: '',          // '' = Claude Code's default
   agentEffort: '',         // '' = default; low | medium | high | xhigh | max (set with /effort in the Claude panel)
   aiUsesChat: true,        // /claude and @Claude comments also read the project's Claude panel chat
+  commentModel: '',        // @Claude comments & suggested fixes ('' = same as the Claude panel)
+  writeModel: '',          // /claude writing ('' = same as the Claude panel)
+  inlineSuggest: true,     // grey suggestions while writing (Tab to accept)
+  suggestModel: 'haiku',   // model for inline suggestions
   agentMode: 'default',    // default | acceptEdits | plan
   agentClaudePath: '',     // '' = find the installed `claude` automatically
 };
@@ -774,6 +778,7 @@ ipcMain.handle('settings:get', () => config.settings);
 ipcMain.handle('settings:set', (_e, patch) => {
   config.settings = { ...config.settings, ...patch };
   saveConfig();
+  if ('agentModel' in patch) for (const st of chats.values()) st.chat?.setModel(patch.agentModel || '').catch(() => {});
   if ('theme' in patch) applyTheme();
   broadcast('settings:changed', config.settings);
   return config.settings;
@@ -1352,7 +1357,7 @@ ipcMain.handle('comments:ask', async (_e, { title, note, quote, thread, notePath
     `<thread>\n${thread.map((m) => `${m.author === 'claude' ? 'Claude' : 'User'}: ${m.text}${m.suggestion ? `\n(Claude suggested replacing the highlight with: ${m.suggestion.text} — ${m.suggestion.status})` : ''}`).join('\n\n')}\n</thread>`,
     'Reply to the last message in the thread.',
   ].join('\n\n');
-  const out = await mod.askOnce({ prompt, system: COMMENT_SYSTEM, claudePath, env, model: config.settings.agentModel, cwd: rootDir() });
+  const out = await mod.askOnce({ prompt, system: COMMENT_SYSTEM, claudePath, env, model: config.settings.commentModel || config.settings.agentModel, cwd: rootDir() });
   const reply = /<reply>([\s\S]*?)<\/reply>/.exec(out)?.[1].trim() ?? out.replace(/<suggestion>[\s\S]*?<\/suggestion>/, '').trim();
   const sug = /<suggestion>\n?([\s\S]*?)\n?<\/suggestion>/.exec(out)?.[1];
   return { reply, suggestion: sug != null && sug !== quote ? sug : null };
@@ -1460,7 +1465,7 @@ ipcMain.handle('write:start', async (e, id, { title, before, after, selection, r
   ].filter(Boolean);
   try {
     return await mod.askOnce({
-      prompt: parts.join('\n\n'), system: kind === 'api' ? WRITE_OPENAPI_SYSTEM : WRITE_SYSTEM, claudePath, env, model: config.settings.agentModel, cwd: rootDir(), signal: ac.signal,
+      prompt: parts.join('\n\n'), system: kind === 'api' ? WRITE_OPENAPI_SYSTEM : WRITE_SYSTEM, claudePath, env, model: config.settings.writeModel || config.settings.agentModel, cwd: rootDir(), signal: ac.signal,
       onDelta: (text) => { if (!e.sender.isDestroyed()) e.sender.send('write:delta', { id, text }); },
     });
   } finally {
@@ -1468,6 +1473,34 @@ ipcMain.handle('write:start', async (e, id, { title, before, after, selection, r
   }
 });
 ipcMain.handle('write:stop', (_e, id) => { writes.get(id)?.abort(); });
+
+// ---------- inline suggestions (grey text while writing, Tab to accept) ----------
+let suggester = null;
+ipcMain.handle('suggest:get', async (_e, { title, before, after }) => {
+  if (config.settings.inlineSuggest === false) return null;
+  const mod = await loadAgent();
+  if (!suggester) {
+    const env = await mod.loginShellEnv();
+    const claudePath = mod.findClaude(env, config.settings.agentClaudePath);
+    if (!claudePath) return null;
+    suggester = new mod.Suggester({ claudePath, env, model: config.settings.suggestModel || 'haiku' });
+  }
+  const prompt = [
+    title ? `Note title: ${title}` : '',
+    `<before_cursor>\n${String(before).slice(-2500)}</before_cursor>`,
+    after?.trim() ? `<after_cursor>${String(after).slice(0, 400)}\n</after_cursor>` : '',
+  ].filter(Boolean).join('\n\n');
+  const out = await suggester.ask(prompt, config.settings.suggestModel || 'haiku');
+  if (out == null) return null;
+  let s = out.split('\n').map((l) => l.trim()).find(Boolean) || '';
+  s = s.replace(/^["“'`]+|["”'`]+$/g, '').replace(/^<\/?before_cursor>|<\/?after_cursor>$/g, '').trimEnd();
+  if (!s || s.length > 220) return null;
+  // Join cleanly with what's already written: add a space between words, never double it.
+  const b = String(before);
+  if (/\s$/.test(b)) s = s.replace(/^\s+/, '');
+  else if (/[\p{L}\p{N},.;:!?)]$/u.test(b) && /^[\p{L}\p{N}(\[*_`]/u.test(s)) s = ' ' + s;
+  return s;
+});
 
 // Post a comment to Confluence: inline on the highlighted text when Confluence can find it, otherwise a page comment.
 // ---------- Confluence pictures (images and draw.io diagrams) ----------

@@ -60,7 +60,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
       <div class="agent-input-wrap">
         <textarea class="agent-input" rows="1" placeholder="Ask Claude… (/ for commands, ↵ to send, ⇧↵ new line)"></textarea>
         <button class="btn primary agent-send" title="Send (↵)">Send</button>
-        <button class="btn agent-stop" title="Stop" hidden>Stop</button>
+        <button class="btn agent-stop" title="Stop (Esc)" hidden>Stop</button>
       </div>
       <div class="agent-status"></div>
     </div>`;
@@ -71,6 +71,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
 
   let ctx = null; // { key, notebook, repo, claudePath, busy, items }
   let loadedKey = null;
+  let userStopped = false; // Stop / Esc pressed → the result line says "Stopped by you"
   let live = null; // streaming assistant bubble
   let liveText = '';
   let liveTimer = null;
@@ -324,7 +325,8 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     finishLive();
     endThinking();
     const secs = r.durationMs ? fmtSecs(Math.max(1000, r.durationMs)) : '';
-    const msg = r.isError ? `Stopped${r.subtype && r.subtype !== 'success' ? ` (${r.subtype.replace(/_/g, ' ')})` : ''}` : 'Done';
+    const msg = r.isError ? (userStopped ? 'Stopped by you' : `Stopped${r.subtype && r.subtype !== 'success' ? ` (${r.subtype.replace(/_/g, ' ')})` : ''}`) : 'Done';
+    userStopped = false;
     log.append(el('div', `result-line${r.isError ? ' err' : ''}`, [msg, secs, r.turns ? `${r.turns} step${r.turns === 1 ? '' : 's'}` : '', r.outputTokens ? `${fmtTokens(r.outputTokens)} tokens` : ''].filter(Boolean).join(' · ')));
     scroll();
   }
@@ -639,6 +641,14 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
   }
   $('.agent-model').addEventListener('click', () => { slash.run('/model'); });
 
+  // Esc while Claude works = stop it (like Claude Code). Works anywhere in the panel.
+  root.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented || !ctx?.busy) return;
+    e.preventDefault();
+    userStopped = true;
+    api.agent.stop(ctx.key);
+    status.textContent = 'Stopping…';
+  });
   input.addEventListener('keydown', (e) => {
     if (slash.onKey(e)) return;
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(input.value); }
@@ -646,7 +656,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
   input.addEventListener('input', () => { autosize(); slash.onInput(); if (ctx?.busy) $('.agent-send').hidden = !input.value.trim(); });
   input.addEventListener('blur', () => setTimeout(() => slash.close(), 150));
   $('.agent-send').addEventListener('click', () => send(input.value));
-  $('.agent-stop').addEventListener('click', () => ctx && api.agent.stop(ctx.key));
+  $('.agent-stop').addEventListener('click', () => { if (ctx) { userStopped = true; api.agent.stop(ctx.key); } });
   $('.agent-mode').addEventListener('change', (e) => setMode(e.target.value));
   $('.agent-more').addEventListener('click', moreMenu);
   $('.agent-chats').addEventListener('click', () => openChats?.());

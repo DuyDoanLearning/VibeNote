@@ -118,6 +118,11 @@ function findByTitle(t) {
 let comments = null; // comments panel (created further down; the editor reports selections and clicks to it)
 const editor = createEditor({
   parent: $('#editor'),
+  // Inline suggestions: grey text when you pause at the end of a line (Tab accepts). Settings → Claude.
+  suggest: {
+    canSuggest: () => S.settings.inlineSuggest !== false && !!S.current && !isApi() && !isTrashed() && S.mode !== 'preview' && !document.querySelector('.cw:not([hidden])'),
+    getSuggestion: ({ before, after }) => api.suggest({ title: S.meta?.title || '', before, after }),
+  },
   onChange(userEdit) {
     if (userEdit) onEdit();
     schedulePreview();
@@ -1455,6 +1460,12 @@ function openPalette(initial = '') {
   input.focus();
 }
 
+// Model choices for the Claude settings ('' = the given default label; null = no default entry).
+const MODEL_OPTS = (dflt) => [
+  ...(dflt ? [['', dflt]] : []),
+  ['opus', 'Opus (most capable)'], ['fable', 'Fable'], ['sonnet', 'Sonnet (balanced)'], ['haiku', 'Haiku (fastest, smallest)'],
+].map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+
 async function openSettings() {
   const ov = overlay('modal-ov');
   const sizes = [12, 13, 14, 15, 16, 17, 18, 20, 22];
@@ -1495,6 +1506,13 @@ async function openSettings() {
       <label class="row"><span>Spell check</span><input type="checkbox" data-k="spellcheck"></label>
       <label class="row"><span>Fetch page titles when pasting links</span><input type="checkbox" data-k="linkTitles"></label>
       <label class="row"><span>Sync preview scrolling</span><input type="checkbox" data-k="scrollSync"></label>
+      <div class="group-label">Claude</div>
+      <label class="row"><span>Claude panel model</span><select data-k="agentModel">${MODEL_OPTS('Claude Code’s default')}</select></label>
+      <label class="row"><span>Comments &amp; suggested fixes</span><select data-k="commentModel">${MODEL_OPTS('Same as Claude panel')}</select></label>
+      <label class="row"><span>/claude writing</span><select data-k="writeModel">${MODEL_OPTS('Same as Claude panel')}</select></label>
+      <label class="row"><span>Inline suggestions while writing (Tab to accept)</span><input type="checkbox" data-k="inlineSuggest"></label>
+      <label class="row"><span>Inline suggestions model</span><select data-k="suggestModel">${MODEL_OPTS(null)}</select></label>
+      <p class="path">Smaller models (Haiku) answer faster and use less of your plan; bigger ones (Opus, Fable) write better.</p>
       <div class="group-label">Storage</div>
       <div class="row"><span>Notes folder</span><button class="btn" data-act="folder">Change…</button></div>
       <p class="path">${esc(S.root)}</p>

@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('vibe', {
   },
   http: { request: invoke('http:request') },
   chatExcerptInfo: invoke('chat:excerpt-info'),
+  suggest: invoke('suggest:get'),
   chats: {
     projects: invoke('chats:projects'),
     list: invoke('chats:list'),

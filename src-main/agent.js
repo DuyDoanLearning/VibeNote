@@ -329,3 +329,97 @@ export async function askOnce({ prompt, system, claudePath, env: baseEnv, model,
   }
   return text.trim();
 }
+
+// ---------- inline suggestions ("autocomplete for writing") ----------
+// One small Claude process kept warm (no tools, no project files), so a suggestion takes ~2s instead of ~3s.
+// Only the newest request matters: while one runs, a newer one replaces any waiting one. The process restarts every
+// few suggestions (so earlier requests don't pile up in its context) and stops when idle.
+export const SUGGEST_SYSTEM = `You are the inline autocomplete in a Markdown notes app — like code autocomplete, but for writing.
+Each user message is a NEW, independent request: ignore all earlier ones.
+It contains the note title, the text before the cursor and some text after it.
+Reply with ONLY the text to insert at the cursor so the writing continues naturally: finish the current sentence, or, if the line already ends a sentence, write the next short sentence.
+Never repeat words that are already written before the cursor. Match the language (English, Vietnamese, …), tone and Markdown context (list item, heading…).
+One line, at most about 20 words. No quotes, no explanation. If nothing useful fits, reply with an empty message.`;
+
+export class Suggester {
+  constructor({ claudePath, env, model }) {
+    this.claudePath = claudePath;
+    this.env = { ...env, CLAUDE_AGENT_SDK_CLIENT_APP: 'vibenote/0.2' };
+    delete this.env.ANTHROPIC_API_KEY;
+    delete this.env.ANTHROPIC_AUTH_TOKEN;
+    delete this.env.CLAUDECODE;
+    this.model = model || 'haiku';
+    this.q = null;
+    this.busy = false;
+    this.pending = null; // { prompt, resolve }
+    this.idle = null;
+  }
+
+  start() {
+    this.queue = createQueue();
+    this.controller = new AbortController();
+    this.q = query({
+      prompt: this.queue,
+      options: {
+        cwd: os.tmpdir(),
+        pathToClaudeCodeExecutable: this.claudePath,
+        env: this.env,
+        model: this.model,
+        tools: [],
+        persistSession: false,
+        settingSources: [],
+        systemPrompt: SUGGEST_SYSTEM,
+        thinking: { type: 'disabled' },
+        effort: 'low',
+        includePartialMessages: false,
+        abortController: this.controller,
+        canUseTool: async () => ({ behavior: 'deny', message: 'No tools.' }),
+      },
+    });
+    this.it = this.q[Symbol.asyncIterator]();
+    this.turns = 0;
+  }
+
+  close() {
+    try { this.queue?.end(); this.controller?.abort(); } catch {}
+    this.q = null;
+  }
+
+  // Resolves with the suggestion text, or null when a newer request replaced this one.
+  ask(prompt, model) {
+    clearTimeout(this.idle);
+    this.idle = setTimeout(() => this.close(), 5 * 60 * 1000);
+    if (model && model !== this.model) { this.model = model; this.close(); }
+    return new Promise((resolve) => {
+      if (this.pending) this.pending.resolve(null);
+      this.pending = { prompt, resolve };
+      this.pump();
+    });
+  }
+
+  async pump() {
+    if (this.busy || !this.pending) return;
+    const { prompt, resolve } = this.pending;
+    this.pending = null;
+    this.busy = true;
+    try {
+      if (!this.q || this.turns >= 12) { this.close(); this.start(); }
+      this.turns++;
+      this.queue.push({ type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null, session_id: '' });
+      let text = '';
+      for (;;) {
+        const { value: m, done } = await this.it.next();
+        if (done) { this.q = null; break; }
+        if (m.type === 'assistant') for (const b of m.message?.content || []) if (b.type === 'text') text += b.text;
+        if (m.type === 'result') break;
+      }
+      resolve(this.pending ? null : text); // a newer request came in meanwhile: this one is stale
+    } catch {
+      this.q = null;
+      resolve(null);
+    } finally {
+      this.busy = false;
+      this.pump();
+    }
+  }
+}
