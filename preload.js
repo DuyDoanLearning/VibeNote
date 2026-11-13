@@ -49,6 +49,11 @@ contextBridge.exposeInMainWorld('vibe', {
     contextUsage: invoke('agent:context-usage'),
     mcp: invoke('agent:mcp'),
     reply: invoke('agent:permission-reply'),
+    threads: invoke('agent:threads'),
+    threadNew: invoke('agent:thread-new'),
+    threadSelect: invoke('agent:thread-select'),
+    threadRename: invoke('agent:thread-rename'),
+    threadDelete: invoke('agent:thread-delete'),
     onEvent: (cb) => ipcRenderer.on('agent:event', (_e, d) => cb(d)),
   },
   confluence: {
@@ -74,6 +79,13 @@ contextBridge.exposeInMainWorld('vibe', {
   http: { request: invoke('http:request') },
   chatExcerptInfo: invoke('chat:excerpt-info'),
   suggest: invoke('suggest:get'),
+  projects: {
+    list: invoke('projects:list'),
+    create: invoke('projects:create'),
+    home: invoke('projects:home'),
+    setSources: invoke('projects:set-sources'),
+    reveal: invoke('projects:reveal'),
+  },
   chats: {
     projects: invoke('chats:projects'),
     list: invoke('chats:list'),

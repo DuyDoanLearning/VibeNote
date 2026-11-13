@@ -6,7 +6,7 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 0. **Latest status lives on the `agent` branch in `docs/handoff.md`** (what was built, how to test, what's pending) — read it with `git show origin/agent:docs/handoff.md` even if you work on `main`.
 1. `git fetch --all --tags` — work happens on two branches (see *Branches*); check which one the owner wants.
 2. `npm install` (Node 20+), then `npm run smoke` to confirm the build works without touching real notes.
-3. Read **`docs/handoff.md`** (latest status: what the `agent` branch has, how to test, what's pending), then `docs/agent-spec.md`, `docs/confluence-spec.md` and `docs/ideas.md` (backlog + owner's top picks).
+3. Read **`docs/handoff.md`** (latest status, how to test, what's pending), then `docs/workspace-spec.md` (the current experiment: Projects), `docs/agent-spec.md`, `docs/confluence-spec.md` and `docs/ideas.md` (backlog + owner's top picks).
 4. Machine-specific things are **not** in the repo: the notes folder (default `~/Documents/VibeNotes`), settings / chat history / version history (`~/Library/Application Support/VibeNote/`), and project links (notebook → code folder, `config.projects`). On a new Mac, relink the "VibeNote Dev" notebook to this repo from the Claude panel (⋯ → Link a Code Folder).
 
 ## The owner and how to work with them
@@ -40,6 +40,12 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - Known limitation: if the user has unsaved typing in a note while Claude edits the same note, the user's text wins on save.
 - Testing the agent spends the owner's Claude usage: keep end-to-end tests tiny, with a scratch git repo and a temp notes folder.
 
+## Projects workspace (agent branch, spec: `docs/workspace-spec.md`)
+- Project = top-level notebook with `Project brief.md` and/or `config.projects[name]` (code folder). `projectFor(notebook, thread?)` in main.js returns `{ name, repo, thread, key }`; **`name` is the project, `key` is the chat** (`name` for the first chat, `name#<id>` for the others) — don't mix them up.
+- Chats index: `userData/agent-chats/_threads.json`; each chat keeps its own file and (optional) `cwd` = the repository it is focused on. `state.pending` holds unanswered Allow/Deny cards so they can be shown again.
+- Extra documents: `sources:` list in the brief's front matter (kept in `meta.extra`; `projects.parseSources` / `setSources`). The renderer decides membership (`projectUI.projectOf(note)`), main only stores the list.
+- `projects.js` runs git read-only with hooks/fsmonitor disabled. The home page is throttled (`homeSoon`) because it asks git for news.
+
 ## Commands
 - `npm start` — build + run (dev)
 - `npm run build` — `build.mjs`: bundles `src/renderer.js` → `dist/renderer.js` and `src-main/agent.js` → `dist/agent.mjs`, copies KaTeX + Mermaid into `dist/`
@@ -63,7 +69,8 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - Details and today's lessons: `docs/handoff.md`.
 
 ## What's next
-- See `docs/handoff.md` → "Parked / next": Confluence sync & comments (parked), real end-to-end Publish test, then make `agent` stable (fix smoke test, merge, tag).
+- Projects workspace steps 2–5 in `docs/workspace-spec.md` (next: draw.io viewer/editor).
+- See `docs/handoff.md` → "Parked / next": Confluence sync & comments (parked), real end-to-end Publish test.
 - Agent phases 2–4 (`docs/agent-spec.md`): Plan/Build buttons and templates, automatic change-log/commit links, codebase map, explain-as-notes, diff viewer, other agents (Codex).
 - Backlog with the owner's top picks: `docs/ideas.md` (⭐ git sync for notes, ⭐ "why does this line exist?", ⭐ a branch per spec).
 - Smaller: floating selection toolbar, ordered-list auto-renumbering, `.tmTheme` theme support.

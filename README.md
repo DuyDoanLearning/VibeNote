@@ -17,12 +17,13 @@ A Markdown note-taking app for macOS, built with Electron. Everything is stored 
 - Themes: built-in light/dark, **any VS Code colour theme** installed on the machine, “Same as VS Code”, or import `.json` / `.vsix`
 - Vim key bindings, line numbers, spell check, font / width settings
 
-## Claude panel (experimental, `agent` branch)
+## Claude panel
 
 Press **⌘J** to open a chat with Claude next to your notes. Link a notebook to a code folder (panel → ⋯ → *Link a Code Folder*) and Claude can plan in your notes, edit code, run commands, commit, and keep a plain-language **Change log** note. Every risky step shows an **Allow / Deny** card first.
 
 Also on the `agent` branch:
 
+- **Projects** (experimental, `agent` branch): a project gathers documents (notes, Confluence pages, API specs), a code folder with one or many repositories, and several Claude chats; its home page shows what changed since you last looked
 - **Live Claude panel**: thinking, each step with its result, diffs, to-dos, helper progress; **slash commands** (`/model`, `/effort`, `/usage`, `/context`, `/mcp`, … and all your Claude Code commands and skills); **Esc** stops Claude
 - **Claude Chats**: browse past Claude Code chats (Terminal, VS Code, apps, T3 Code) per project, continue one in the panel, or save it as a note
 - **/claude** writes Markdown at the cursor; **@Claude** in comments; both can use your panel conversation as background
@@ -98,6 +99,7 @@ The notes folder is self-contained, so it can be synced between Macs (iCloud Dri
 | `src/markdown.js` | Markdown → HTML (marked + wiki links, math, highlight, footnotes, callouts, Mermaid) |
 | `src/theme.js` | Maps a VS Code theme to VibeNote's CSS variables |
 | `src/search.js` | Search filters and fuzzy matching |
+| `projects.js` / `src/project-ui.js` | Projects: repositories in a workspace folder, the brief's document list; sidebar section, home page, pickers |
 | `src/agent-panel.js` | The Claude chat panel (messages, tool activity, Allow/Deny cards, questions, plans) |
 | `src/ghost.js` | Inline suggestions while writing: grey text after the cursor, Tab to accept (main.js suggest:get → a small warm Claude process) |
 | `src/agent-slash.js` | Slash commands in the Claude panel (/model, /effort, /usage, /context, /mcp… + Claude Code's own commands and skills) |

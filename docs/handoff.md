@@ -13,7 +13,16 @@ titles or ids, colleagues' names, company names) in it.
   (The smoke test was fixed on 2026-11-13 evening: it now sets the title in the title field; `npm run smoke` passes
   on both branches.)
 
-## What the `agent` branch has (newest first)
+## New on `agent` since v1.1.0 (2026-11-13, late evening)
+
+**Projects workspace, step 1** (spec and next steps: `docs/workspace-spec.md`): Projects sidebar section, project
+home page, multi-repo workspace (repositories found inside the linked folder; nested CLAUDE.md verified to load in a
+live test), several chats per project with a switcher in the Claude panel, project chip on notes. Tested with
+`projects:*` / `agent:thread-*` IPC in an isolated profile plus one tiny live Haiku chat. Not yet used by the owner on
+real projects: expect feedback. The owner's real "VibeNote Dev" notebook shows up as a project automatically
+(it has a linked folder).
+
+## What v1.1.0 brought into stable (newest first)
 
 | Feature | Where | Notes |
 |---|---|---|

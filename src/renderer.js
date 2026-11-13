@@ -12,6 +12,7 @@ import { createWriter } from './writer.js';
 import { createApiDocs } from './apidocs.js';
 import { createChatsUI } from './chats-ui.js';
 import { createChangesUI } from './changes-ui.js';
+import { createProjectUI } from './project-ui.js';
 import { diffLines } from 'diff';
 import { splitTarget, parseOperation, apiOperations, embeddedSpecs, mdHeadings, linksTo } from './links.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
@@ -117,6 +118,7 @@ function findByTitle(t) {
 }
 
 // ---------- editor ----------
+var projectUI = null; // projects: sidebar section + home page (created further down)
 let comments = null; // comments panel (created further down; the editor reports selections and clicks to it)
 const editor = createEditor({
   parent: $('#editor'),
@@ -235,6 +237,7 @@ async function refresh() {
       S.root = data.root;
       S.notebooks = data.notebooks;
       S.notes = data.notes;
+      await projectUI?.reload();
       validateFilter();
       if (S.current) {
         let cur = currentNote();
@@ -305,6 +308,8 @@ async function openNote(path) {
   S.meta = data.meta;
   S.dirty = false;
   S.touched = false;
+  const pj = projectUI?.projectOf(n);
+  if (pj) { S.project = pj; store('project', pj); }
   editor.setDoc(data.body, !!n.trashed, langOf(n));
   if (!SINGLE) store('last', path);
   renderAll();
@@ -684,6 +689,16 @@ function renderAll() {
   }
   renderToolbar();
   renderMeta();
+  homeSoon();
+}
+
+// The project home page shows while no note is open; it asks git for news, so refresh it at most every few seconds.
+let homeTimer = null;
+let homeAt = 0;
+function homeSoon() {
+  if (!S.home || S.current || !projectUI) return;
+  clearTimeout(homeTimer);
+  homeTimer = setTimeout(() => { homeAt = Date.now(); if (S.home && !S.current) projectUI.renderHome(); }, Math.max(300, 4000 - (Date.now() - homeAt)));
 }
 
 function makeDropTarget(node, notebook) {
@@ -724,6 +739,7 @@ function renderSidebar() {
   const f = S.filter;
   const notes = live();
 
+  projectUI?.renderSide();
   const lib = $('#library');
   lib.textContent = '';
   lib.append(
@@ -1056,6 +1072,11 @@ function renderList() {
 function renderToolbar() {
   const n = currentNote();
   document.body.classList.toggle('no-note', !n);
+  document.body.classList.toggle('project-home', !n && !!S.home);
+  const chipFor = n && !n.trashed ? projectUI?.projectOf(n) : null;
+  const pchip = $('#project-chip');
+  pchip.hidden = !chipFor;
+  if (chipFor) { pchip.lastElementChild.textContent = chipFor; pchip.title = `Part of the project “${chipFor}” — open its home page`; pchip.dataset.project = chipFor; }
   document.body.classList.toggle('in-trash', !!n?.trashed);
   document.body.classList.toggle('api-note', n?.kind === 'api');
   const sel = $('#nb-select');
@@ -1185,6 +1206,7 @@ function setMode(m) {
 }
 
 function setFilter(f) {
+  if (S.home && !(f.type === 'notebook' && f.name === S.home)) S.home = null; // leaving the project's home page
   S.filter = f;
   store('filter', f);
   if (f.type === 'notebook') expandTo(f.name);
@@ -1698,6 +1720,9 @@ const COMMANDS = [
   { id: 'sections-expand', title: 'Expand All Note List Headings', when: () => !SINGLE && S.sections.length > 0, run: () => setSections(true) },
   { id: 'sections-collapse', title: 'Collapse All Note List Headings', when: () => !SINGLE && S.sections.length > 0, run: () => setSections(false) },
   { id: 'settings', title: 'Settings', key: '⌘,', run: openSettings },
+  { id: 'new-project', title: 'New Project…', when: () => !SINGLE, run: () => projectUI.newProject() },
+  { id: 'project-home', title: 'Go to Project Home', when: () => !SINGLE && !!(projectUI.projectOf(currentNote()) || S.project), run: () => projectUI.openHome(projectUI.projectOf(currentNote()) || S.project) },
+  { id: 'new-chat', title: 'New Claude Chat in This Project', run: () => { comments.toggle(false); agentPanel.toggle(true); agentPanel.newThread(); } },
   { id: 'toggle-agent', title: 'Toggle Claude Panel', key: '⌘J', run: () => { comments.toggle(false); agentPanel.toggle(); } },
   { id: 'claude-chats', title: 'Claude Chats… (past chats: read, continue, save as note)', when: () => !SINGLE, run: () => chatsUI.open() },
   { id: 'claude-write', title: 'Ask Claude to Write… (/claude)', key: '⇧⌘J', when: needNote, run: () => writer.open() },
@@ -1756,6 +1781,8 @@ function bindUI() {
   $('#more-btn').addEventListener('click', moreMenu);
   $('#back-btn').addEventListener('click', () => navigate(-1));
   $('#image-btn').addEventListener('click', insertImages);
+  $('#project-add').addEventListener('click', () => projectUI.newProject());
+  $('#project-chip').addEventListener('click', (e) => projectUI.openHome(e.currentTarget.dataset.project));
   $('#agent-btn').addEventListener('click', () => { comments.toggle(false); agentPanel.toggle(); });
   window.addEventListener('vibe:insert-image', insertImages);
   $('#fwd-btn').addEventListener('click', () => navigate(1));
@@ -1876,7 +1903,7 @@ const agentPanel = createAgentPanel({
   getContext: () => {
     const n = currentNote();
     return {
-      notebook: n ? n.notebook : (S.filter.type === 'notebook' ? S.filter.name : ''),
+      notebook: (n ? projectUI?.projectOf(n) || n.notebook : S.home || (S.filter.type === 'notebook' ? S.filter.name : '')),
       notePath: n && !n.trashed ? n.path : null,
       noteTitle: n ? n.title : null,
     };
@@ -1901,7 +1928,7 @@ var changesUI = createChangesUI({
 // Claude Chats window: past Claude Code chats → read, continue in the panel, save as a note.
 const chatsUI = createChatsUI({
   api, $, el, overlay, closeOverlay, toast,
-  getNotebook: () => { const n = currentNote(); return n ? n.notebook : (S.filter.type === 'notebook' ? S.filter.name : ''); },
+  getNotebook: () => { const n = currentNote(); return n ? projectUI?.projectOf(n) || n.notebook : S.home || (S.filter.type === 'notebook' ? S.filter.name : ''); },
   afterContinue: async (key) => {
     await save();
     await refresh();
@@ -1917,6 +1944,15 @@ const chatsUI = createChatsUI({
     if (n && !visibleNotes().includes(n)) setFilter({ type: 'all' });
     await openNote(p);
   },
+});
+
+projectUI = createProjectUI({
+  api, S, $, el, esc, overlay, closeOverlay, toast, live, inBook, kindOf, fmtDate, openNote, setFilter, leaveCurrent, closeNote, refresh, store, load, currentNote,
+  reserved: [CONFLUENCE_ROOT, API_ROOT],
+  agent: () => agentPanel,
+  openChats: () => chatsUI.open(),
+  openChanges: () => changesUI.open(),
+  rerenderList: () => renderList(),
 });
 
 comments = createComments({

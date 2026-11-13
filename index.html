@@ -17,6 +17,13 @@
       <div class="side-scroll">
         <nav id="library"></nav>
         <div class="section-head">
+          <span>Projects</span>
+          <button id="project-add" class="mini" title="New project (documents, code and chats in one place)">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+        <div id="projects"></div>
+        <div class="section-head">
           <span>Notebooks</span>
           <button id="add-notebook" class="mini" title="New notebook (⇧⌘N)">
             <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
@@ -79,6 +86,7 @@
           <button id="fwd-btn" class="icon nav" title="Forward (⌃⇧-)">
             <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
           </button>
+          <button id="project-chip" class="project-chip" hidden><svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg><span></span></button>
           <label class="nb-pick" title="Notebook">
             <svg viewBox="0 0 24 24"><path d="M5 4h12a2 2 0 012 2v14H7a2 2 0 01-2-2zM5 18a2 2 0 012-2h12"/></svg>
             <select id="nb-select"></select>
@@ -148,6 +156,7 @@
         <button id="empty-new" class="btn primary">New note <kbd>⌘N</kbd></button>
         <p class="empty-hint">or press <kbd>⌘K</kbd> to jump anywhere</p>
       </div>
+      <div id="project-home"></div>
       <footer id="status"><span id="status-words"></span><span id="status-save"></span></footer>
     </main>
     <aside id="comments"></aside>

@@ -16,6 +16,7 @@ const os = require('os');
 const { pathToFileURL } = require('url');
 const themes = require('./themes');
 const claudeChats = require('./claude-chats');
+const projects = require('./projects');
 
 // Also trust the certificates the Mac trusts (like browsers do): on a company network whose proxy re-signs HTTPS with
 // a certificate IT installed on the Mac, Atlassian / Swagger requests then work instead of failing. Never turns checks off.
@@ -117,6 +118,7 @@ function loadConfig() {
     const c = JSON.parse(fs.readFileSync(configPath(), 'utf8'));
     if (c.root) config.root = c.root;
     if (c.projects && typeof c.projects === 'object') config.projects = c.projects;
+    if (c.projectSeen && typeof c.projectSeen === 'object') config.projectSeen = c.projectSeen;
     config.settings = { ...DEFAULT_SETTINGS, ...(c.settings || {}) };
   } catch {}
 }
@@ -881,13 +883,40 @@ function writeChat(key, data) {
   fs.writeFileSync(chatFile(key), JSON.stringify({ sessionId: data.sessionId, cwd: data.cwd || undefined, fork: data.fork || undefined, background: data.background || undefined, items: data.items.slice(-400) }, null, 1));
 }
 
-function projectFor(notebook) {
-  const key = String(notebook || '').split('/')[0];
-  const repo = key && config.projects[key];
-  return repo && fs.existsSync(repo) ? { key, repo } : { key: '', repo: null, notebook: key };
+// Several chats per project. '' is a project's first chat (file "<project>.json", as before chats could be
+// several); the others are "<project>#<id>". The index lives next to the chat files.
+const threadsFile = () => path.join(chatsDir(), '_threads.json');
+let threadIndex = null;
+function allThreads() {
+  if (!threadIndex) { try { threadIndex = JSON.parse(fs.readFileSync(threadsFile(), 'utf8')); } catch { threadIndex = {}; } }
+  return threadIndex;
+}
+function saveThreads() {
+  fs.mkdirSync(chatsDir(), { recursive: true });
+  fs.writeFileSync(threadsFile(), JSON.stringify(allThreads(), null, 1));
+}
+function projectThreads(name) {
+  const all = allThreads();
+  const pt = (all[name] ||= { active: '', list: [] });
+  if (!pt.list.length) pt.list.push({ id: '', title: '', created: 0 });
+  return pt;
+}
+const chatKey = (name, id) => (id ? `${name}#${id}` : name);
+const isProjectName = (name) => !!name && (!!config.projects[name] || fs.existsSync(path.join(rootDir(), name, projects.BRIEF)));
+
+// The project a notebook belongs to, and which of its chats is in front.
+//   name: project (top-level notebook) or '' for plain notes · key: the chat's id for files, events and the chats map
+function projectFor(notebook, threadId) {
+  const top = String(notebook || '').split('/')[0];
+  const linked = top && config.projects[top];
+  const repo = linked && fs.existsSync(linked) ? linked : null;
+  const name = top && (repo || isProjectName(top)) ? top : '';
+  const pt = projectThreads(name);
+  const th = pt.list.find((t) => t.id === (threadId ?? pt.active)) || pt.list[0];
+  return { name, repo, notebook: top, thread: th.id, key: chatKey(name, th.id) };
 }
 
-function systemPromptFor(project) {
+function systemPromptFor(project, info = {}) {
   const root = rootDir();
   const lines = [
     'You are running inside VibeNote, the user\'s Markdown notes app, as their writing and coding assistant. The user reads your replies in a narrow chat panel: keep them short and plain-spoken.',
@@ -896,10 +925,19 @@ function systemPromptFor(project) {
     '- Every note has a version history (who changed it — You, Claude or Confluence — and when). Use the note_history tool (mcp__vibenote__note_history) to list a note\'s versions or see exactly what changed in one, e.g. when asked what changed recently or why something is different.',
     '- API specs are OpenAPI YAML/JSON files in the notes folder; [[Title]] and [[Title#Heading]] / [[Spec#GET /path]] link notes, Confluence pages and specs.',
   ];
+  if (project.name && info.sources?.length) {
+    lines.push(`- Documents that belong to this project but live elsewhere in the notes folder (specs, Confluence pages written by the business analyst, API specs): ${info.sources.map((s) => `"${path.join(root, s)}"`).join(', ')}. Read them when the task depends on requirements.`);
+  }
+  if (project.name && info.brief) {
+    lines.push(`- Project brief (the note "${path.join(root, project.name, projects.BRIEF)}"). Treat it as what you already know about this project, and add a line to its Decisions when a real decision is made:\n<project-brief>\n${info.brief}\n</project-brief>`);
+  }
   if (project.repo) {
-    const nb = path.join(root, project.key);
+    const nb = path.join(root, project.name);
+    if (info.repos?.length > 1 || (info.repos?.length === 1 && info.repos[0].rel)) {
+      lines.push(`- The project's workspace folder ${project.repo} holds several git repositories: ${info.repos.map((r) => (r.rel || '.') + (r.hasGuide ? ' (has its own CLAUDE.md)' : '')).join(', ')}. Each is its own repository: run git inside the repository you are changing, read a repository's CLAUDE.md before working in it, and say which repository you changed.${info.cwd && info.cwd !== project.repo ? ` This chat is focused on ${path.relative(project.repo, info.cwd)} (your working directory).` : ''}`);
+    }
     lines.push(
-      `- Current project: notebook "${project.key}" (${nb}), linked to the code repository ${project.repo} (your working directory).`,
+      `- Current project: notebook "${project.name}" (${nb}), linked to the code ${info.repos?.length > 1 ? 'workspace' : 'repository'} ${project.repo}${info.cwd && info.cwd !== project.repo ? '' : ' (your working directory)'}.`,
       'Note-driven workflow:',
       '- Spec notes say what the user wants. When asked to plan, write the plan into the note as a checklist of small steps ("- [ ] step") and stop for review — do not start coding until the user says so.',
       '- When building, do one plan step at a time. When a step is done (and committed), tick its checkbox ("- [x]").',
@@ -949,12 +987,14 @@ async function ensureChat(wc, key, project) {
   // A continued chat runs in the folder it was started in (Claude Code finds chats by folder) — if that's inside the project.
   const cwd = saved.cwd && project.repo && (saved.cwd === project.repo || saved.cwd.startsWith(project.repo + path.sep)) && fs.existsSync(saved.cwd)
     ? saved.cwd : project.repo || rootDir();
-  state = { key, wc, items: saved.items || [], sessionId: saved.sessionId || null, cwd: cwd === (project.repo || rootDir()) ? undefined : cwd, fork: !!saved.fork, background: saved.background };
+  state = { key, wc, items: saved.items || [], sessionId: saved.sessionId || null, cwd: cwd === (project.repo || rootDir()) ? undefined : cwd, fork: !!saved.fork, background: saved.background, pending: new Map() };
+  const info = project.name ? await promptInfo(project, cwd) : {};
   state.chat = new mod.AgentChat({
     cwd,
     fork: state.fork,
-    additionalDirectories: project.repo ? [rootDir()] : [],
-    appendSystemPrompt: systemPromptFor(project),
+    // a chat focused on one repository can still read the rest of the workspace (upstream / downstream services)
+    additionalDirectories: project.repo ? [rootDir(), ...(cwd !== project.repo ? [project.repo] : [])] : [],
+    appendSystemPrompt: systemPromptFor(project, info),
     model: config.settings.agentModel,
     effort: config.settings.agentEffort || undefined,
     permissionMode: config.settings.agentMode,
@@ -990,6 +1030,7 @@ async function ensureChat(wc, key, project) {
       const id = `p${++permSeq}`;
       const finish = (decision) => {
         permissionWaits.delete(id);
+        state.pending.delete(id);
         if (!decision || decision.behavior === 'deny') {
           resolve({ behavior: 'deny', message: decision?.message || 'The user declined this action.' });
         } else {
@@ -998,7 +1039,9 @@ async function ensureChat(wc, key, project) {
       };
       permissionWaits.set(id, { finish, input, suggestions });
       signal?.addEventListener('abort', () => { if (permissionWaits.has(id)) { finish(null); agentSend(state.wc, key, { kind: 'permission_cancel', id }); } });
-      agentSend(state.wc, key, { kind: 'permission', id, tool, input, title, reason, canRemember: !!suggestions?.length });
+      const evt = { kind: 'permission', id, tool, input, title, reason, canRemember: !!suggestions?.length };
+      state.pending.set(id, evt); // so the card can be shown again when the user comes back to this chat
+      agentSend(state.wc, key, evt);
     }),
   });
   chats.set(key, state);
@@ -1007,7 +1050,8 @@ async function ensureChat(wc, key, project) {
 
 ipcMain.handle('agent:context', async (_e, notebook) => {
   const project = projectFor(notebook);
-  const state = chats.get(project.key) || { key: project.key, ...readChat(project.key) };
+  const live = chats.get(project.key);
+  const state = live || { key: project.key, ...readChat(project.key) };
   let claudePath = null;
   try {
     const mod = await loadAgent();
@@ -1015,11 +1059,15 @@ ipcMain.handle('agent:context', async (_e, notebook) => {
   } catch {}
   return {
     key: project.key,
-    notebook: project.key || project.notebook || '',
+    name: project.name,
+    thread: project.thread,
+    notebook: project.name || project.notebook || '',
     repo: project.repo,
+    cwd: state.cwd || null,
     claudePath,
-    busy: !!chats.get(project.key)?.chat?.busy,
+    busy: !!live?.chat?.busy,
     items: state.items || [],
+    pending: live && !live.chat.closed ? [...live.pending.values()] : [],
     hasSession: !!state.sessionId,
   };
 });
@@ -1039,13 +1087,17 @@ ipcMain.handle('agent:link', async (e, notebook) => {
 ipcMain.handle('agent:unlink', (_e, key) => {
   delete config.projects[key];
   saveConfig();
-  const st = chats.get(key);
-  if (st) { st.chat.close(); chats.delete(key); }
+  closeProjectChats(key);
 });
 
-ipcMain.handle('agent:send', async (e, { notebook, text, notePath, noteTitle }) => {
+ipcMain.handle('agent:send', async (e, { notebook, text, notePath, noteTitle, label }) => {
   const project = projectFor(notebook);
   const state = await ensureChat(e.sender, project.key, project);
+  const th = projectThreads(project.name).list.find((t) => t.id === project.thread);
+  if (th && !th.title && th.id && !state.items.some((i) => i.kind === 'user')) {
+    th.title = String(label || text).replace(/\s+/g, ' ').trim().slice(0, 60);
+    saveThreads();
+  }
   const context = notePath
     ? `<vibenote-context>\nThe user is viewing the note "${noteTitle}" — ${notePath}\n</vibenote-context>\n\n`
     : '';
@@ -1092,6 +1144,179 @@ ipcMain.handle('agent:new', (_e, key) => {
   if (st) { st.chat.close(); chats.delete(key); }
   writeChat(key, { sessionId: null, items: [] }); // also resets a continued chat's folder
 });
+// ---------- several chats per project ----------
+function closeProjectChats(name) {
+  for (const [key, st] of chats) {
+    if (key === name || key.startsWith(name + '#')) { st.chat.close(); chats.delete(key); }
+  }
+}
+const chatStatus = (key) => {
+  const st = chats.get(key);
+  return st && !st.chat.closed ? (st.pending.size ? 'needs-ok' : st.chat.busy ? 'working' : 'idle') : 'idle';
+};
+function threadList(name) {
+  const pt = projectThreads(name);
+  const repo = config.projects[name];
+  const active = (pt.list.find((t) => t.id === pt.active) || pt.list[0]).id;
+  return {
+    active,
+    list: pt.list.map((t) => {
+      const key = chatKey(name, t.id);
+      const saved = chats.get(key) || readChat(key);
+      const first = (saved.items || []).find((i) => i.kind === 'user');
+      let updated = t.created || 0;
+      try { updated = fs.statSync(chatFile(key)).mtimeMs; } catch {}
+      return {
+        id: t.id,
+        key,
+        title: t.title || (first ? first.text.replace(/<vibenote-context>[\s\S]*?<\/vibenote-context>\s*/, '').replace(/\s+/g, ' ').trim().slice(0, 60) : '') || 'New chat',
+        scope: saved.cwd && repo && saved.cwd !== repo ? path.relative(repo, saved.cwd) : '',
+        empty: !first,
+        status: chatStatus(key),
+        updated,
+      };
+    }),
+  };
+}
+const repoCache = new Map(); // workspace folder → { at, repos }
+async function workspaceRepos(folder) {
+  if (!folder) return [];
+  const hit = repoCache.get(folder);
+  if (hit && Date.now() - hit.at < 60e3) return hit.repos;
+  const repos = (await projects.findRepos(folder)).map((r) => ({ ...r, hasGuide: fs.existsSync(path.join(r.path, 'CLAUDE.md')) || fs.existsSync(path.join(r.path, '.claude', 'CLAUDE.md')) }));
+  repoCache.set(folder, { at: Date.now(), repos });
+  return repos;
+}
+async function readBrief(name) {
+  try {
+    const { meta, body } = parseNote(await fsp.readFile(path.join(rootDir(), name, projects.BRIEF), 'utf8'));
+    return { meta, body, sources: projects.parseSources(meta.extra) };
+  } catch {
+    return null;
+  }
+}
+// What a project's chats are told up front: its repositories, its outside documents, and the brief.
+async function promptInfo(project, cwd) {
+  const [repos, brief] = await Promise.all([workspaceRepos(project.repo), readBrief(project.name)]);
+  const text = (brief?.body || '').trim();
+  return { repos, cwd, sources: brief?.sources || [], brief: text && text !== projects.BRIEF_TEMPLATE.trim() ? text.slice(0, 6000) : '' };
+}
+
+ipcMain.handle('agent:threads', async (_e, notebook) => {
+  const project = projectFor(notebook);
+  return { name: project.name, ...threadList(project.name), repos: (await workspaceRepos(project.repo)).filter((r) => r.rel) };
+});
+ipcMain.handle('agent:thread-new', (_e, notebook, opts = {}) => {
+  const project = projectFor(notebook);
+  const pt = projectThreads(project.name);
+  // reuse an untouched empty chat with the same focus instead of piling up blanks
+  const cwd = opts.cwd && project.repo && (opts.cwd === project.repo || String(opts.cwd).startsWith(project.repo + path.sep)) && fs.existsSync(opts.cwd) ? String(opts.cwd) : null;
+  const focus = cwd && cwd !== project.repo ? cwd : undefined;
+  const blank = pt.list.find((t) => { const c = chats.get(chatKey(project.name, t.id)) || readChat(chatKey(project.name, t.id)); return !(c.items || []).length && !c.sessionId && (c.cwd || undefined) === focus; });
+  const id = blank ? blank.id : `t${Date.now().toString(36)}`;
+  if (!blank) {
+    pt.list.push({ id, title: opts.title ? String(opts.title).slice(0, 60) : '', created: Date.now() });
+    writeChat(chatKey(project.name, id), { sessionId: null, cwd: focus, items: [] });
+  }
+  pt.active = id;
+  saveThreads();
+  return { id, key: chatKey(project.name, id) };
+});
+ipcMain.handle('agent:thread-select', (_e, notebook, id) => {
+  const project = projectFor(notebook);
+  const pt = projectThreads(project.name);
+  if (pt.list.some((t) => t.id === id)) { pt.active = id; saveThreads(); }
+});
+ipcMain.handle('agent:thread-rename', (_e, notebook, id, title) => {
+  const th = projectThreads(projectFor(notebook).name).list.find((t) => t.id === id);
+  if (th) { th.title = String(title || '').replace(/\s+/g, ' ').trim().slice(0, 60); saveThreads(); }
+});
+ipcMain.handle('agent:thread-delete', (_e, notebook, id) => {
+  const project = projectFor(notebook);
+  const pt = projectThreads(project.name);
+  const key = chatKey(project.name, id);
+  const st = chats.get(key);
+  if (st) { st.chat.close(); chats.delete(key); }
+  try { fs.unlinkSync(chatFile(key)); } catch {}
+  pt.list = pt.list.filter((t) => t.id !== id);
+  if (!pt.list.length) pt.list.push({ id: '', title: '', created: 0 });
+  if (!pt.list.some((t) => t.id === pt.active)) pt.active = pt.list[pt.list.length - 1].id;
+  saveThreads();
+});
+
+// ---------- projects (spec: docs/workspace-spec.md) ----------
+async function listProjectsInfo() {
+  const root = rootDir();
+  let ents = [];
+  try { ents = await fsp.readdir(root, { withFileTypes: true }); } catch {}
+  const out = [];
+  for (const e of ents) {
+    if (!e.isDirectory() || e.name.startsWith('.') || !isProjectName(e.name)) continue;
+    const linked = config.projects[e.name] || null;
+    const brief = await readBrief(e.name);
+    out.push({ name: e.name, repo: linked, repoMissing: !!linked && !fs.existsSync(linked), hasBrief: !!brief, sources: brief?.sources || [] });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+ipcMain.handle('projects:list', () => listProjectsInfo());
+
+async function ensureBrief(name) {
+  const dir = notebookDir(name);
+  await fsp.mkdir(dir, { recursive: true });
+  const file = path.join(dir, projects.BRIEF);
+  if (!fs.existsSync(file)) await fsp.writeFile(file, serializeNote({ tags: ['project'] }, projects.BRIEF_TEMPLATE, baseOf(file)), { flag: 'wx' });
+  return file;
+}
+ipcMain.handle('projects:create', async (_e, name) => {
+  const clean = safeName(name);
+  if (!clean || clean.includes('/')) throw new Error('Give the project a name.');
+  return { name: clean, brief: await ensureBrief(clean) };
+});
+
+ipcMain.handle('projects:set-sources', async (_e, name, list) => {
+  const file = await ensureBrief(String(name));
+  const { meta, body } = parseNote(await fsp.readFile(file, 'utf8'));
+  const clean = [];
+  for (const s of Array.isArray(list) ? list : []) { try { inRoot(String(s)); clean.push(String(s)); } catch {} }
+  meta.extra = projects.setSources(meta.extra, clean);
+  await fsp.writeFile(file, serializeNote(meta, body, baseOf(file)), 'utf8');
+  // idle chats restart on their next message, so they learn the new document list (busy ones are left alone)
+  for (const [key, st] of chats) {
+    if ((key === name || key.startsWith(name + '#')) && !st.chat.busy) { st.chat.close(); chats.delete(key); }
+  }
+  return projects.parseSources(meta.extra);
+});
+
+// Everything the project home page shows that the notes list doesn't already know.
+ipcMain.handle('projects:home', async (_e, name, markSeen) => {
+  name = String(name || '');
+  if (!isProjectName(name)) return null;
+  const project = projectFor(name);
+  config.projectSeen ||= {};
+  const seenAt = config.projectSeen[name] || 0;
+  const [brief, found] = await Promise.all([readBrief(name), workspaceRepos(project.repo)]);
+  const repos = await Promise.all(found.map((r) => projects.repoInfo(r, seenAt)));
+  let past = [];
+  if (project.repo) {
+    try { past = (await claudeChats.listChats(project.repo, true)).slice(0, 8); } catch {}
+  }
+  if (markSeen) { config.projectSeen[name] = Date.now(); saveConfig(); }
+  const text = (brief?.body || '').trim();
+  return {
+    name,
+    repo: config.projects[name] || null,
+    repoMissing: !!config.projects[name] && !project.repo,
+    briefPath: brief ? path.join(rootDir(), name, projects.BRIEF) : null,
+    brief: text === projects.BRIEF_TEMPLATE.trim() ? '' : text.slice(0, 4000),
+    sources: brief?.sources || [],
+    repos,
+    past,
+    threads: threadList(name),
+    seenAt,
+  };
+});
+ipcMain.handle('projects:reveal', (_e, p) => { if (fs.existsSync(String(p))) shell.openPath(String(p)); });
+
 // ---------- Claude Chats window: past Claude Code chats (read-only), continue one, save one as a note ----------
 const headOf = async (f, n = 600) => {
   const fh = await fsp.open(f, 'r').catch(() => null);
@@ -1127,9 +1352,15 @@ ipcMain.handle('chats:continue', async (_e, { cwd, id, createNotebook }) => {
     config.projects[key] = cwd;
     saveConfig();
   }
-  const st = chats.get(key);
-  if (st) { st.chat.close(); chats.delete(key); }
   const repo = config.projects[key];
+  // A continued chat becomes one more chat of the project (the chat that was open stays as it is).
+  const pt = projectThreads(key);
+  const tid = `t${Date.now().toString(36)}`;
+  pt.list.push({ id: tid, title: String(meta.title || 'Continued chat').replace(/\s+/g, ' ').slice(0, 60), created: Date.now() });
+  pt.active = tid;
+  saveThreads();
+  const notebookKey = key;
+  key = chatKey(key, tid);
   if (meta.source === 't3') {
     // No Claude Code chat behind it: start a new chat that gets this conversation as background.
     writeChat(key, {
@@ -1138,7 +1369,7 @@ ipcMain.handle('chats:continue', async (_e, { cwd, id, createNotebook }) => {
       background: claudeChats.asBackground(chat),
       items: [...items.filter((i) => i.kind !== 'note').map(({ at, ...i }) => i), { kind: 'note', text: 'Continuing from a T3 Code thread — Claude gets this conversation as background with your first message' }],
     });
-    return { key, background: true };
+    return { key: notebookKey, background: true };
   }
   writeChat(key, {
     sessionId: meta.id,
@@ -1146,7 +1377,7 @@ ipcMain.handle('chats:continue', async (_e, { cwd, id, createNotebook }) => {
     cwd: folder !== repo ? folder : undefined,
     items: [...items.filter((i) => i.kind !== 'note').map(({ at, ...i }) => i), { kind: 'note', text: 'Continued from a past chat — new messages go to a copy; the original is unchanged' }],
   });
-  return { key };
+  return { key: notebookKey };
 });
 
 // Save a chat as a Markdown note (updates the note if this chat was saved before).
@@ -1441,7 +1672,7 @@ function panelChat(notePath, max = 16000) {
   const project = projectFor(nb);
   const state = chats.get(project.key) || readChat(project.key);
   const msgs = (state.items || []).filter((i) => (i.kind === 'user' || i.kind === 'text') && i.text?.trim());
-  if (!msgs.length) return { messages: 0, project: project.key || nb || '', text: '' };
+  if (!msgs.length) return { messages: 0, project: project.name || nb || '', text: '' };
   const out = [];
   let size = 0;
   for (let i = msgs.length - 1; i >= 0 && size < max; i--) {
@@ -1454,8 +1685,8 @@ function panelChat(notePath, max = 16000) {
   const skipped = msgs.length - out.length;
   return {
     messages: msgs.length,
-    project: project.key || nb || '',
-    text: `<claude_panel_chat project=${JSON.stringify(project.key || nb || 'notes')}>\n${skipped > 0 ? `(${skipped} earlier messages left out)\n\n` : ''}${out.join('\n\n')}\n</claude_panel_chat>`,
+    project: project.name || nb || '',
+    text: `<claude_panel_chat project=${JSON.stringify(project.name || nb || 'notes')}>\n${skipped > 0 ? `(${skipped} earlier messages left out)\n\n` : ''}${out.join('\n\n')}\n</claude_panel_chat>`,
   };
 }
 ipcMain.handle('chat:excerpt-info', (_e, notePath) => {
