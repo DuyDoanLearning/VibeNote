@@ -907,12 +907,14 @@ function record(state, evt) {
       if (last && last.kind === 'text' && last.streaming) { last.text = evt.text; delete last.streaming; } else items.push({ kind: 'text', text: evt.text });
       break;
     case 'tool': items.push({ kind: 'tool', id: evt.id, name: evt.name, input: evt.input }); break;
+    case 'thinking': if (evt.text?.trim()) items.push({ kind: 'thinking', text: evt.text.slice(0, 6000) }); break;
+    case 'note': items.push({ kind: 'note', text: evt.text }); break;
     case 'tool_result': {
       const t = items.find((i) => i.kind === 'tool' && i.id === evt.id);
       if (t) { t.done = true; t.isError = evt.isError; t.result = evt.text.slice(0, 1500); }
       break;
     }
-    case 'result': items.push({ kind: 'result', isError: evt.isError, durationMs: evt.durationMs, turns: evt.turns }); writeChat(state.key, state); break;
+    case 'result': items.push({ kind: 'result', isError: evt.isError, durationMs: evt.durationMs, turns: evt.turns, outputTokens: evt.outputTokens }); writeChat(state.key, state); break;
     case 'error': items.push({ kind: 'error', message: evt.message }); writeChat(state.key, state); break;
     default: break;
   }

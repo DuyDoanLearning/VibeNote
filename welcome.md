@@ -54,6 +54,11 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - **⌥⌘Y** opens Version History: every version shows **who** made it (You, Claude, Confluence) and **Changes** shows exactly what was added (green) and removed (red).
 - Claude can read the history too — ask it in the Claude panel "what changed in this note today?".
 
+## Watching Claude work
+
+- The Claude panel shows what Claude is doing, like Claude Code in Terminal: its **thinking** (live, then folded into "✻ Thought for 5s"), each **step** as it starts (with a short result such as "→ 120 lines" or "→ +3 −1"), to-do lists, helper agents' progress, and a status line with time and tokens.
+- Click a step to see the details — edits show as a red/green diff.
+
 ## Your past Claude chats
 
 - Open **Claude Chats** (the 🕘 button in the Claude panel, or ⌘K → *Claude Chats*) to see every Claude Code chat you've had in a project folder — from Terminal, VS Code, VibeNote or **T3 Code** (including its helper threads) — and read them as clean conversations.

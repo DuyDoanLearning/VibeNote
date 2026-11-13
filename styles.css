@@ -685,3 +685,33 @@ body.api-note #status-pick, body.api-note #tag-list, body.api-note #tag-input, b
 .chats-more { height: 1px; }
 .chats-src.t3 { color: #0891b2; font-weight: 600; }
 .chats-helper { color: var(--faint); font-style: italic; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Claude panel: live thinking, steps, to-dos (Claude Code style) ---------- */
+.thinking { font-size: 12px; color: var(--muted); }
+.thinking summary { cursor: default; list-style: none; padding: 2px 6px; border-radius: 7px; font-style: italic; color: var(--faint); }
+.thinking summary::-webkit-details-marker { display: none; }
+.thinking summary:hover { background: var(--hover); }
+.thinking.live summary { color: var(--accent); animation: think-pulse 1.6s ease-in-out infinite; }
+.thinking.empty summary { pointer-events: none; }
+@keyframes think-pulse { 50% { opacity: .55; } }
+.thinking-body { margin: 2px 0 4px 8px; padding: 4px 0 4px 10px; border-left: 2px solid var(--border); white-space: pre-wrap; font-style: italic; line-height: 1.5; max-height: 260px; overflow-y: auto; }
+.thinking-body:empty { display: none; }
+.tool-wrap { display: flex; flex-direction: column; }
+.tool summary .tool-text { flex: 0 1 auto; min-width: 0; }
+.tool-sum { color: var(--faint); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 0; min-width: 0; }
+.tool-sum:not(:empty)::before { content: '→ '; }
+.tool.err .tool-sum { color: #ef4444; }
+.tool-time { color: var(--faint); font-size: 10.5px; margin-left: auto; flex: none; }
+.tool .tool-detail { margin: 4px 0 4px 15px; }
+.tool-sub { font-size: 11px; color: var(--faint); margin: 0 0 2px 21px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tool-sub:not(.done)::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--accent); animation: blink 1s steps(1) infinite; }
+.todo-card { border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; font-size: 12.5px; background: var(--bg); }
+.todo-title { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px; }
+.todo { display: flex; gap: 7px; padding: 1px 0; color: var(--text); }
+.todo-box { flex: none; width: 14px; color: var(--faint); }
+.todo.completed { color: var(--faint); text-decoration: line-through; }
+.todo.in_progress { color: var(--accent); font-weight: 600; }
+.todo.in_progress .todo-box { color: var(--accent); }
+#agent.busy .agent-status { color: var(--accent); }
+#agent.busy .agent-status::before { content: none; }
+.agent-status { font-family: var(--mono); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -107,6 +107,8 @@ export class AgentChat {
           // Continuing a chat from the Claude Chats window: work on a copy, so a Terminal session of it is never disturbed.
           forkSession: !!(o.resume && o.fork),
           includePartialMessages: true,
+          // Show Claude's thinking (as summaries) in the panel, like Claude Code does.
+          thinking: { type: 'adaptive', display: 'summarized' },
           settingSources: ['user', 'project', 'local'],
           systemPrompt: { type: 'preset', preset: 'claude_code', append: o.appendSystemPrompt },
           // VibeNote's own tools for Claude: read a note's version history (read-only, no permission prompt).
@@ -162,23 +164,55 @@ export class AgentChat {
           emit({ kind: 'init', sessionId: m.session_id, model: m.model, mode: m.permissionMode, cwd: m.cwd });
         } else if (m.subtype === 'api_retry' || m.subtype === 'status') {
           if (m.status || m.message) emit({ kind: 'status', text: String(m.status || m.message) });
+        } else if (/^task_(started|progress|updated|notification)$/.test(m.subtype || '')) {
+          // Helper agents (Task/Agent tool): progress for the tool row that started them.
+          emit({
+            kind: 'task', toolUseId: m.tool_use_id, description: m.description, lastTool: m.last_tool_name,
+            summary: m.summary, tokens: m.usage?.total_tokens, steps: m.usage?.tool_uses, status: m.patch?.status || m.status,
+          });
+        } else if (m.subtype === 'compact_boundary') {
+          emit({ kind: 'note', text: 'Conversation compacted to save space' });
+        } else if (m.subtype === 'thinking_tokens') {
+          // tokens = everything Claude has written this turn so far (earlier replies + this one)
+          emit({ kind: 'tokens', output: (this.tokBase || 0) + (m.estimated_tokens || 0) });
         }
         break;
+      case 'tool_progress':
+        if (m.parent_tool_use_id) emit({ kind: 'sub_tool', parent: m.parent_tool_use_id, name: m.tool_name });
+        else emit({ kind: 'tool_progress', id: m.tool_use_id, seconds: m.elapsed_time_seconds });
+        break;
       case 'stream_event': {
-        if (m.parent_tool_use_id) break; // ignore sub-agent chatter
+        if (m.parent_tool_use_id) break; // helper agents: summarised via task / sub_tool events
         const ev = m.event;
-        if (ev?.type === 'content_block_delta' && ev.delta?.type === 'text_delta') emit({ kind: 'delta', text: ev.delta.text });
+        if (ev?.type === 'message_start') this.tokBase = this.tokTotal || 0;
+        if (ev?.type === 'content_block_start') {
+          const cb = ev.content_block || {};
+          if (cb.type === 'thinking' || cb.type === 'redacted_thinking') emit({ kind: 'thinking_start' });
+          else if (cb.type === 'tool_use' || cb.type === 'server_tool_use') emit({ kind: 'tool_start', id: cb.id, name: cb.name });
+        } else if (ev?.type === 'content_block_delta') {
+          if (ev.delta?.type === 'text_delta') emit({ kind: 'delta', text: ev.delta.text });
+          else if (ev.delta?.type === 'thinking_delta') emit({ kind: 'thinking_delta', text: ev.delta.thinking });
+        } else if (ev?.type === 'message_delta' && ev.usage?.output_tokens) {
+          this.tokTotal = (this.tokBase || 0) + ev.usage.output_tokens;
+          emit({ kind: 'tokens', output: this.tokTotal });
+        }
         break;
       }
       case 'assistant': {
-        if (m.parent_tool_use_id) break;
+        if (m.parent_tool_use_id) {
+          for (const b of m.message?.content || []) if (b.type === 'tool_use') emit({ kind: 'sub_tool', parent: m.parent_tool_use_id, name: b.name, input: b.input });
+          break;
+        }
         for (const b of m.message?.content || []) {
+          if (b.type === 'thinking') emit({ kind: 'thinking', text: b.thinking || '' });
+          if (b.type === 'redacted_thinking') emit({ kind: 'thinking', text: '' });
           if (b.type === 'text' && b.text.trim()) emit({ kind: 'text', text: b.text });
           if (b.type === 'tool_use') emit({ kind: 'tool', id: b.id, name: b.name, input: b.input });
         }
         break;
       }
       case 'user': {
+        if (m.parent_tool_use_id) break; // a helper agent's own tool results
         const content = m.message?.content;
         if (!Array.isArray(content)) break;
         for (const b of content) {
@@ -200,6 +234,7 @@ export class AgentChat {
           durationMs: m.duration_ms,
           turns: m.num_turns,
           errors: m.errors,
+          outputTokens: m.usage?.output_tokens,
         });
         break;
       default:
@@ -210,6 +245,7 @@ export class AgentChat {
   send(text) {
     if (this.closed) throw new Error('This chat has ended — start a new one');
     this.busy = true;
+    this.tokBase = this.tokTotal = 0;
     this.queue.push({
       type: 'user',
       message: { role: 'user', content: text },

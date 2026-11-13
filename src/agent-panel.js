@@ -24,8 +24,17 @@ const TOOL_ASK = {
 const TOOL_LABEL = {
   Read: 'Read', Write: 'Wrote', Edit: 'Edited', MultiEdit: 'Edited', NotebookEdit: 'Edited',
   Bash: 'Ran', Grep: 'Searched', Glob: 'Listed', WebFetch: 'Fetched', WebSearch: 'Searched the web',
-  TodoWrite: 'Updated the to-do list', Task: 'Started a helper', Agent: 'Started a helper',
+  TodoWrite: 'Updated the to-do list', Task: 'Helper', Agent: 'Helper', Skill: 'Used skill',
+  TaskCreate: 'Added a to-do', TaskUpdate: 'Updated a to-do', TaskList: 'Checked the to-dos',
 };
+// What the status line says while a tool runs (Claude Code style).
+const TOOL_DOING = {
+  Read: 'Reading', Write: 'Writing', Edit: 'Editing', MultiEdit: 'Editing', NotebookEdit: 'Editing', Bash: 'Running',
+  Grep: 'Searching', Glob: 'Listing files', WebFetch: 'Fetching', WebSearch: 'Searching the web', Task: 'Helper working', Agent: 'Helper working',
+};
+const SPIN = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢'];
+const fmtTokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n || 0));
+const fmtSecs = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; };
 
 export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChanged, openChats }) {
   const root = document.getElementById('agent');
@@ -62,8 +71,13 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
   let live = null; // streaming assistant bubble
   let liveText = '';
   let liveTimer = null;
-  const toolRows = new Map();
+  const toolRows = new Map(); // tool id → { row, name, input, sub }
   const cards = new Map();
+  // live turn state (status line)
+  let turn = null; // { start, tokens, thinkingTokens, activity }
+  let think = null; // live thinking block { box, sum, body, text, start }
+  let spinI = 0;
+  let ticker = null;
 
   for (const [label, prompt] of QUICK) {
     const b = el('button', 'chip', label);
@@ -115,6 +129,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
   }
 
   function addText(text) {
+    endThinking();
     if (live) {
       live.replaceWith(md(text));
       finishLive();
@@ -125,6 +140,8 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
   }
 
   function delta(t) {
+    endThinking();
+    activity('Writing');
     liveText += t;
     if (!live) {
       live = md('');
@@ -137,35 +154,175 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     }, 60);
   }
 
+  // A tool row appears as soon as Claude starts the call (tool_start), and fills in when the full call arrives.
   function addTool(t) {
     if (t.name === 'AskUserQuestion' || t.name === 'ExitPlanMode') return; // shown as cards
-    const row = el('details', 'tool');
-    const sum = el('summary');
-    sum.append(el('span', 'tool-state'), el('span', 'tool-text', toolSummary(t.name, t.input)));
-    row.append(sum);
-    const pre = el('pre', 'tool-detail');
-    pre.textContent = t.name === 'Bash' ? String(t.input?.command || '') : JSON.stringify(t.input, null, 2).slice(0, 3000);
-    row.append(pre);
-    if (t.done) markTool(row, t.isError, t.result);
-    toolRows.set(t.id, row);
-    log.append(row);
+    endThinking();
+    if (t.name === 'TodoWrite' && t.input?.todos) { toolRows.get(t.id)?.wrap.remove(); toolRows.delete(t.id); return addTodos(t.input.todos); }
+    let r = toolRows.get(t.id);
+    if (!r) {
+      const wrap = el('div', 'tool-wrap');
+      const row = el('details', 'tool');
+      const sum = el('summary');
+      sum.append(el('span', 'tool-state'), el('span', 'tool-text'), el('span', 'tool-sum'), el('span', 'tool-time'));
+      row.append(sum);
+      wrap.append(row);
+      r = { wrap, row, name: t.name, input: {}, steps: 0 };
+      toolRows.set(t.id, r);
+      log.append(wrap);
+    }
+    r.name = t.name || r.name;
+    if (t.input && Object.keys(t.input).length) {
+      r.input = t.input;
+      r.row.querySelector('.tool-detail')?.remove();
+      const detail = permissionDetail(r.name, r.input);
+      detail.classList.add('tool-detail');
+      r.row.append(detail);
+    }
+    r.row.querySelector('.tool-text').textContent = Object.keys(r.input).length ? toolSummary(r.name, r.input) : `${TOOL_LABEL[r.name] || r.name}…`;
+    if (Object.keys(r.input).length) activity(doing(r.name, r.input));
+    if (t.done) markTool(t.id, t.isError, t.result);
     scroll();
   }
 
-  function markTool(row, isError, text) {
-    row.classList.add(isError ? 'err' : 'ok');
-    if (text) {
+  function doing(name, input = {}) {
+    const verb = TOOL_DOING[name];
+    if (!verb) return `${TOOL_LABEL[name] || name.replace(/^mcp__[^_]+__/, '')}`;
+    if (input.file_path) return `${verb} ${relPath(input.file_path).split('/').pop()}`;
+    if (name === 'Bash') return `${verb} ${input.description || String(input.command || '').split('\n')[0].slice(0, 40)}`;
+    if (name === 'Task' || name === 'Agent') return `${verb}: ${input.description || ''}`;
+    return verb;
+  }
+
+  // One-line result next to the step, like Claude Code's "⎿ Read 120 lines".
+  function resultSummary(name, input = {}, text = '', isError) {
+    if (isError) return 'failed';
+    const lines = String(text).split('\n').filter((l) => l.trim());
+    if (name === 'Read') return `${lines.length} line${lines.length === 1 ? '' : 's'}`;
+    if (name === 'Edit' || name === 'MultiEdit') {
+      const edits = input.edits || [input];
+      const add = edits.reduce((s, e) => s + String(e.new_string || '').split('\n').length, 0);
+      const del = edits.reduce((s, e) => s + String(e.old_string || '').split('\n').length, 0);
+      return `+${add} −${del}`;
+    }
+    if (name === 'Write') return `${String(input.content || '').split('\n').length} lines`;
+    if (name === 'Grep' || name === 'Glob') return /^No (files|matches)/i.test(lines[0] || '') ? 'nothing found' : `${lines.length} result${lines.length === 1 ? '' : 's'}`;
+    if (name === 'Bash') return lines.length ? lines[lines.length - 1].trim().slice(0, 70) : 'done';
+    return '';
+  }
+
+  function markTool(id, isError, text) {
+    const r = toolRows.get(id);
+    if (!r) return;
+    r.row.classList.add(isError ? 'err' : 'ok');
+    r.row.querySelector('.tool-sum').textContent = resultSummary(r.name, r.input, text, isError);
+    r.row.querySelector('.tool-time').textContent = '';
+    if (text && !r.row.querySelector('.tool-result')) {
       const out = el('pre', 'tool-result');
       out.textContent = text;
-      row.append(out);
+      r.row.append(out);
     }
+    r.sub?.classList.add('done');
+  }
+
+  // Helper agent progress under its tool row.
+  function subProgress(id, { steps, last, tokens, status }) {
+    const r = toolRows.get(id);
+    if (!r) return;
+    if (!r.sub) { r.sub = el('div', 'tool-sub'); r.wrap.append(r.sub); }
+    if (steps != null) r.steps = steps; else r.steps++;
+    if (last) r.last = last;
+    if (tokens) r.tokens = tokens;
+    r.sub.textContent = `↳ ${r.steps} step${r.steps === 1 ? '' : 's'}${r.last ? ` · ${r.last}` : ''}${r.tokens ? ` · ${fmtTokens(r.tokens)} tokens` : ''}${status && status !== 'running' ? ` · ${status}` : ''}`;
+    scroll();
+  }
+
+  // To-do list (TodoWrite) as a live checklist.
+  function addTodos(todos) {
+    const card = el('div', 'todo-card');
+    card.append(el('div', 'todo-title', 'To-dos'));
+    for (const t of todos) {
+      const row = el('div', `todo ${t.status || 'pending'}`);
+      row.append(el('span', 'todo-box', t.status === 'completed' ? '☑' : t.status === 'in_progress' ? '◐' : '☐'),
+        el('span', '', t.status === 'in_progress' ? (t.activeForm || t.content) : t.content));
+      card.append(row);
+    }
+    log.append(card);
+    const now = todos.find((t) => t.status === 'in_progress');
+    if (now) activity(now.activeForm || now.content);
+    scroll();
+  }
+
+  // ---------- thinking ----------
+  function startThinking() {
+    if (think) return;
+    finishLive();
+    const box = el('details', 'thinking live');
+    box.open = true;
+    const sum = el('summary', '', '✻ Thinking…');
+    const body = el('div', 'thinking-body');
+    box.append(sum, body);
+    log.append(box);
+    think = { box, sum, body, text: '', start: Date.now(), timer: null };
+    activity('Thinking');
+    scroll();
+  }
+  function thinkingDelta(t) {
+    if (!think) startThinking();
+    think.text += t;
+    clearTimeout(think.timer);
+    const k = think;
+    think.timer = setTimeout(() => { k.body.textContent = k.text; scroll(); }, 60);
+  }
+  function endThinking(finalText) {
+    if (!think) {
+      if (finalText?.trim()) { // thinking that arrived without streaming (or from history)
+        const box = el('details', 'thinking');
+        box.append(el('summary', '', '✻ Thought'), el('div', 'thinking-body', finalText));
+        log.append(box);
+      }
+      return;
+    }
+    const k = think;
+    think = null;
+    clearTimeout(k.timer);
+    const text = finalText?.trim() ? finalText : k.text;
+    k.body.textContent = text;
+    k.sum.textContent = `✻ Thought for ${fmtSecs(Date.now() - k.start)}`;
+    k.box.classList.remove('live');
+    k.box.open = false;
+    if (!text.trim()) k.box.classList.add('empty');
+  }
+
+  // ---------- status line ----------
+  function activity(text) {
+    if (turn) { turn.activity = text; renderStatus(); }
+  }
+  function renderStatus() {
+    if (!turn) return;
+    const parts = [`${turn.activity || 'Working'}…`, fmtSecs(Date.now() - turn.start)];
+    if (turn.tokens) parts.push(`↓ ${fmtTokens(turn.tokens)} tokens`);
+    status.textContent = `${SPIN[spinI % SPIN.length]} ${parts.join(' · ')}`;
+  }
+  function startTurn() {
+    turn = { start: Date.now(), tokens: 0, thinkingTokens: 0, activity: 'Working' };
+    clearInterval(ticker);
+    ticker = setInterval(() => { spinI++; renderStatus(); }, 160);
+    renderStatus();
+  }
+  function endTurn() {
+    clearInterval(ticker);
+    ticker = null;
+    turn = null;
+    endThinking();
   }
 
   function addResult(r) {
     finishLive();
-    const secs = r.durationMs ? `${Math.max(1, Math.round(r.durationMs / 1000))}s` : '';
+    endThinking();
+    const secs = r.durationMs ? fmtSecs(Math.max(1000, r.durationMs)) : '';
     const msg = r.isError ? `Stopped${r.subtype && r.subtype !== 'success' ? ` (${r.subtype.replace(/_/g, ' ')})` : ''}` : 'Done';
-    log.append(el('div', `result-line${r.isError ? ' err' : ''}`, [msg, secs, r.turns ? `${r.turns} step${r.turns === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')));
+    log.append(el('div', `result-line${r.isError ? ' err' : ''}`, [msg, secs, r.turns ? `${r.turns} step${r.turns === 1 ? '' : 's'}` : '', r.outputTokens ? `${fmtTokens(r.outputTokens)} tokens` : ''].filter(Boolean).join(' · ')));
     scroll();
   }
 
@@ -206,6 +363,8 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
 
   function addPermission(p) {
     finishLive();
+    endThinking();
+    activity('Waiting for your OK');
     const card = el('div', 'perm-card');
     if (p.tool === 'AskUserQuestion') return addQuestion(p, card);
     if (p.tool === 'ExitPlanMode') return addPlan(p, card);
@@ -317,6 +476,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
       if (it.kind === 'user') addUser(it.text.replace(/^<vibenote-context>[\s\S]*?<\/vibenote-context>\s*/, ''));
       else if (it.kind === 'text') addText(it.text);
       else if (it.kind === 'tool') addTool(it);
+      else if (it.kind === 'thinking') endThinking(it.text);
       else if (it.kind === 'result') addResult(it);
       else if (it.kind === 'error') addError(it.message);
       else if (it.kind === 'note') log.append(el('div', 'result-line', it.text));
@@ -328,8 +488,9 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     ctx && (ctx.busy = b);
     $('.agent-stop').hidden = !b;
     $('.agent-send').hidden = b && !input.value.trim();
-    status.textContent = b ? 'Claude is working…' : '';
     root.classList.toggle('busy', b);
+    if (b && !turn) startTurn();
+    if (!b) { endTurn(); status.textContent = ''; }
   }
 
   function setMode(mode) {
@@ -404,10 +565,23 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     switch (evt.kind) {
       case 'delta': delta(evt.text); break;
       case 'text': addText(evt.text); break;
+      case 'thinking_start': startThinking(); break;
+      case 'thinking_delta': thinkingDelta(evt.text); break;
+      case 'thinking': endThinking(evt.text); break;
+      case 'tokens': if (turn) turn.tokens = evt.output; break;
+      case 'tool_start': addTool({ id: evt.id, name: evt.name }); break;
       case 'tool': addTool(evt); break;
+      case 'tool_progress': {
+        const r = toolRows.get(evt.id);
+        if (r && evt.seconds >= 2) r.row.querySelector('.tool-time').textContent = fmtSecs(evt.seconds * 1000);
+        break;
+      }
+      case 'task': if (evt.toolUseId) subProgress(evt.toolUseId, { steps: evt.steps, last: evt.lastTool, tokens: evt.tokens, status: evt.status }); break;
+      case 'sub_tool': subProgress(evt.parent, { last: evt.input ? toolSummary(evt.name, evt.input) : evt.name }); break;
+      case 'note': log.append(el('div', 'result-line', evt.text)); scroll(); break;
       case 'tool_result': {
-        const row = toolRows.get(evt.id);
-        if (row) markTool(row, evt.isError, evt.text);
+        markTool(evt.id, evt.isError, evt.text);
+        activity('Thinking');
         if (!evt.isError) onNoteMaybeChanged();
         break;
       }
@@ -417,7 +591,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
         if (card) { card.classList.add('answered'); card.querySelector('.perm-actions')?.replaceWith(el('div', 'perm-answer', 'Cancelled')); cards.delete(evt.id); }
         break;
       }
-      case 'status': status.textContent = evt.text; break;
+      case 'status': activity(/^requesting$/i.test(evt.text) ? 'Thinking' : evt.text.replace(/^./, (c) => c.toUpperCase())); break;
       case 'result': addResult(evt); setBusy(false); break;
       case 'error': addError(evt.message); setBusy(false); break;
       case 'closed': setBusy(false); break;
