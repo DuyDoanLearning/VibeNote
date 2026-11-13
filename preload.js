@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('vibe', {
     postToConfluence: invoke('confluence:comment'),
   },
   http: { request: invoke('http:request') },
+  chatExcerptInfo: invoke('chat:excerpt-info'),
   chats: {
     projects: invoke('chats:projects'),
     list: invoke('chats:list'),

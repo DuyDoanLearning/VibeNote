@@ -34,6 +34,7 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 
 - Type **/claude** on a new line (or press **⇧⌘J**) and ask for something: a table, a checklist, a summary, a diagram… Claude's Markdown appears as it's written; click **Insert** to add it.
 - Select text first and press **⇧⌘J** to have Claude rewrite it (**Replace**). Type a new request in the box to adjust the result.
+- /claude and @Claude comments also know what you discussed in the **Claude panel** for that project (decisions, names, preferences). The box shows “+ your Claude chat (N messages)” — click it to turn that off.
 
 ## API specs (Swagger / OpenAPI)
 

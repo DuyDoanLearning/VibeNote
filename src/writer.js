@@ -1,6 +1,7 @@
 // /claude — a small box at the cursor: type a request, Claude writes Markdown (streamed live, shown rendered),
 // then Insert (or Replace, when text was selected), Try again, or Discard. Nothing changes in the note until Insert.
-// Claude gets the note title and the text around the cursor; it has no tools (main.js write:start → agent.askOnce).
+// Claude gets the note title, the text around the cursor, recent edits and (switchable) the project's Claude panel chat;
+// it has no tools (main.js write:start → agent.askOnce).
 import { renderMarkdown, postProcess } from './markdown.js';
 
 // Claude sometimes wraps everything in ```markdown … ``` — unwrap that.
@@ -19,6 +20,7 @@ export function createWriter(ctx) {
       <textarea class="cw-input" rows="1" spellcheck="false" placeholder="Ask Claude to write…  e.g. a table comparing Qdrant and Memgraph"></textarea>
       <button class="btn primary cw-go" title="Send (Enter)">Write</button>
     </div>
+    <div class="cw-ctx" hidden>Uses this note and its recent edits<button class="cw-chat" title="Also give Claude your recent Claude panel conversation about this project (click to turn off)"></button></div>
     <div class="cw-status"></div>
     <article class="cw-out markdown" hidden></article>
     <div class="cw-actions" hidden>
@@ -33,6 +35,34 @@ export function createWriter(ctx) {
   const status = $('.cw-status', box);
   const actions = $('.cw-actions', box);
   const insertBtn = $('[data-act=insert]', box);
+  const chatBtn = $('.cw-chat', box);
+  let useChat = true;
+  let chatInfo = null;
+
+  // "+ your Claude chat (N messages)" — click to turn the chat context off/on (remembered).
+  async function showContext() {
+    const ctxRow = $('.cw-ctx', box);
+    try { chatInfo = await api.chatExcerptInfo(S.current); } catch { chatInfo = null; }
+    useChat = chatInfo?.enabled !== false;
+    ctxRow.hidden = false;
+    chatBtn.hidden = !chatInfo?.messages;
+    paintChat();
+    place();
+  }
+  function paintChat() {
+    if (!chatInfo?.messages) return;
+    chatBtn.classList.toggle('on', useChat);
+    chatBtn.textContent = useChat
+      ? `+ your Claude chat${chatInfo.project ? ` in “${chatInfo.project}”` : ''} (${chatInfo.messages} message${chatInfo.messages === 1 ? '' : 's'}) ✓`
+      : '· Claude chat not used (click to include)';
+  }
+  chatBtn.addEventListener('click', () => {
+    useChat = !useChat;
+    api.setSettings({ aiUsesChat: useChat });
+    if (chatInfo) chatInfo.enabled = useChat;
+    paintChat();
+    input.focus();
+  });
 
   let at = null; // { from, to, selection } where the result goes
   let draft = ''; // current result (Markdown)
@@ -86,6 +116,7 @@ export function createWriter(ctx) {
     box.hidden = false;
     place();
     input.focus();
+    showContext();
   }
 
   function close() {
@@ -125,6 +156,7 @@ export function createWriter(ctx) {
         request,
         draft: revise,
         kind: isApi() ? 'api' : 'note',
+        useChat,
       });
       if (runId !== id) return; // stopped or replaced
       draft = final || draft;
