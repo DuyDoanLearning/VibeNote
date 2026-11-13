@@ -30,3 +30,16 @@ await build({
   banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
   logLevel: 'info',
 });
+
+// Main-process Atlassian connection (MCP client + OAuth), bundled the same way.
+await build({
+  entryPoints: ['src-main/atlassian.js'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node22',
+  outfile: 'dist/atlassian.mjs',
+  external: ['electron'],
+  banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
+  logLevel: 'info',
+});
