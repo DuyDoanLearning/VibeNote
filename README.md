@@ -21,13 +21,23 @@ A Markdown note-taking app for macOS, built with Electron. Everything is stored 
 
 Press **⌘J** to open a chat with Claude next to your notes. Link a notebook to a code folder (panel → ⋯ → *Link a Code Folder*) and Claude can plan in your notes, edit code, run commands, commit, and keep a plain-language **Change log** note. Every risky step shows an **Allow / Deny** card first.
 
+Also on the `agent` branch:
+
+- **Live Claude panel**: thinking, each step with its result, diffs, to-dos, helper progress; **slash commands** (`/model`, `/effort`, `/usage`, `/context`, `/mcp`, … and all your Claude Code commands and skills); **Esc** stops Claude
+- **Claude Chats**: browse past Claude Code chats (Terminal, VS Code, apps, T3 Code) per project, continue one in the panel, or save it as a note
+- **/claude** writes Markdown at the cursor; **@Claude** in comments; both can use your panel conversation as background
+- **Inline suggestions** while writing (grey text, Tab to accept) and a model choice per feature (Settings → Claude)
+- **Confluence**: fetch page trees as notes, edit, push back surgically; publish a note as a new page; **Changes to push** (push one or all); pictures and draw.io diagrams; comments
+- **API specs**: OpenAPI/Swagger editor with live Swagger or Reference docs and Try it out; deep links between notes, pages and specs
+- Note list grouped by notebook / tag / type; version history that shows who changed what (you, Claude, Confluence)
+
 It runs on **your installed [Claude Code](https://claude.com/claude-code)** and its existing login (via the Claude Agent SDK), so install Claude Code and run `claude` once to sign in. This is meant for personal use; an app distributed to others should use API-key authentication instead.
 
 ### Versions and rollback
 
 | Version | Where |
 |---|---|
-| Stable markdown app | branch `main`, tags `v*-stable` (newest: `v1.0.1-stable`) |
+| Stable markdown app | branch `main`, tags `v*-stable` (newest: `v1.0.2-stable`) |
 | Experimental (Claude panel) | branch `agent` |
 
 Install any version into /Applications (notes and settings are not touched):

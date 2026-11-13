@@ -5,7 +5,7 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 ## Read this first (continuing on another machine or session)
 1. `git fetch --all --tags` — work happens on two branches (see *Branches*); check which one the owner wants.
 2. `npm install` (Node 20+), then `npm run smoke` to confirm the build works without touching real notes.
-3. Read `docs/agent-spec.md` (the current experiment) and `docs/ideas.md` (backlog + owner's top picks).
+3. Read **`docs/handoff.md`** (latest status: what the `agent` branch has, how to test, what's pending), then `docs/agent-spec.md`, `docs/confluence-spec.md` and `docs/ideas.md` (backlog + owner's top picks).
 4. Machine-specific things are **not** in the repo: the notes folder (default `~/Documents/VibeNotes`), settings / chat history / version history (`~/Library/Application Support/VibeNote/`), and project links (notebook → code folder, `config.projects`). On a new Mac, relink the "VibeNote Dev" notebook to this repo from the Claude panel (⋯ → Link a Code Folder).
 
 ## The owner and how to work with them
@@ -17,7 +17,7 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - When a user-facing feature changes, update `welcome.md` (first-run note) and, if asked, the owner's "Guide" notebook notes (in their notes folder, not the repo).
 
 ## Branches / releases
-- `main` + tags `v*-stable` (newest: `v1.0.1-stable`) = the stable Markdown app. Keep it stable; only fixes and docs go here. Tag each stable fix release `vX.Y.Z-stable` (the install script picks the newest).
+- `main` + tags `v*-stable` (newest: `v1.0.2-stable`) = the stable Markdown app. Keep it stable; only fixes and docs go here. Tag each stable fix release `vX.Y.Z-stable` (the install script picks the newest).
 - `agent` = the experimental Claude panel (spec: `docs/agent-spec.md`). Experimental work goes here.
 - `scripts/install-version.sh <ref>` builds any version in a temporary worktree and installs it into /Applications — the owner's rollback path (no argument = newest `v*-stable` tag) and upgrade path (`agent`).
 
@@ -56,7 +56,13 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - New commands: add to `COMMANDS` in renderer.js (shows up in the ⌘K palette) and, if it needs a menu/shortcut, to `buildMenu()` in main.js. Editor keys that CodeMirror must handle use `fmt()` menu items (`registerAccelerator: false`) so the key isn't stolen from the editor.
 - Commit messages: imperative summary line; end with the Co-Authored-By trailer.
 
+## Testing Confluence / Claude features
+- Fake Atlassian in a harness: `ipcMain.removeHandler('confluence:…')` after requiring main.js, then register stand-ins. Real Atlassian only off the owner's office network (its proxy re-signs HTTPS with an untrusted certificate) and only under the owner's private scratch page.
+- Live Claude tests: tiny prompts on Haiku in a throwaway folder; delete the test folders from `~/.claude/projects` afterwards.
+- Details and today's lessons: `docs/handoff.md`.
+
 ## What's next
+- See `docs/handoff.md` → "Parked / next": Confluence sync & comments (parked), real end-to-end Publish test, then make `agent` stable (fix smoke test, merge, tag).
 - Agent phases 2–4 (`docs/agent-spec.md`): Plan/Build buttons and templates, automatic change-log/commit links, codebase map, explain-as-notes, diff viewer, other agents (Codex).
 - Backlog with the owner's top picks: `docs/ideas.md` (⭐ git sync for notes, ⭐ "why does this line exist?", ⭐ a branch per spec).
 - Smaller: floating selection toolbar, ordered-list auto-renumbering, `.tmTheme` theme support.
