@@ -37,14 +37,16 @@ It runs on **your installed [Claude Code](https://claude.com/claude-code)** and 
 
 | Version | Where |
 |---|---|
-| Stable markdown app | branch `main`, tags `v*-stable` (newest: `v1.0.2-stable`) |
-| Experimental (Claude panel) | branch `agent` |
+| Stable (notes, Claude panel, Confluence, API specs) | branch `main`, tags `v*-stable` (newest: `v1.1.0-stable`) |
+| Notes only, before the Claude panel | tag `v1.0.2-stable` |
+| Experimental (Projects workspace) | branch `agent` |
 
 Install any version into /Applications (notes and settings are not touched):
 
 ```sh
 scripts/install-version.sh              # back to the newest stable release
 scripts/install-version.sh agent        # the experimental build
+scripts/install-version.sh v1.0.2-stable   # the notes-only app, before the Claude panel
 scripts/install-version.sh <commit>     # anything else
 ```
 

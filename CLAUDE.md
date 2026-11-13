@@ -18,8 +18,8 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - When a user-facing feature changes, update `welcome.md` (first-run note) and, if asked, the owner's "Guide" notebook notes (in their notes folder, not the repo).
 
 ## Branches / releases
-- `main` + tags `v*-stable` (newest: `v1.0.2-stable`) = the stable Markdown app. Keep it stable; only fixes and docs go here. Tag each stable fix release `vX.Y.Z-stable` (the install script picks the newest).
-- `agent` = the experimental Claude panel (spec: `docs/agent-spec.md`). Experimental work goes here.
+- `main` + tags `v*-stable` (newest: `v1.1.0-stable`, which brought the Claude panel, Confluence and API specs into stable on 2026-11-13; `v1.0.2-stable` is the last notes-only release) = the stable app. Keep it stable; only fixes and docs go here. Tag each stable fix release `vX.Y.Z-stable` (the install script picks the newest).
+- `agent` = experimental work. Current experiment: the Projects workspace (spec: `docs/workspace-spec.md`).
 - `scripts/install-version.sh <ref>` builds any version in a temporary worktree and installs it into /Applications — the owner's rollback path (no argument = newest `v*-stable` tag) and upgrade path (`agent`).
 
 ## Principles
