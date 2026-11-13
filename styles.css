@@ -627,3 +627,21 @@ body.api-note #status-pick, body.api-note #tag-list, body.api-note #tag-input, b
 .apidocs.view-reference .api-ui { flex: 1; min-height: 0; }
 .apidocs .ref-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
 .api-modal-body.apidocs.view-reference { overflow: hidden; }
+
+/* ---------- note list sections (Arrange → Group by) and type badges ---------- */
+.note-title .api-badge { flex: none; margin-right: 1px; }
+.api-badge.kind-note { background: #e5534b; }
+.api-badge.kind-confluence { background: #0c66e4; }
+.group-head { display: flex; align-items: center; gap: 6px; padding: 16px 8px 5px; cursor: pointer; user-select: none; color: var(--text); }
+.group-head:first-child { padding-top: 6px; }
+.group-head .chev { margin-right: 0; }
+.group-head:hover .chev { color: var(--text); }
+.group-head .api-badge { margin-right: 0; }
+.group-head .dot { width: 8px; height: 8px; flex: none; }
+.group-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-count { margin-left: auto; color: var(--faint); font-size: 11px; font-weight: 500; }
+.group-head.depth-0 { font-size: 15.5px; font-weight: 800; letter-spacing: -.01em; }
+.group-head.depth-0:not(:first-child) { margin-top: 4px; border-top: 1px solid var(--border); }
+.group-head.depth-1 { font-size: 12.5px; font-weight: 650; color: var(--muted); padding-top: 10px; }
+.group-head.depth-2, .group-head.depth-3 { font-size: 12px; font-weight: 600; color: var(--faint); padding-top: 8px; }
+.group-head.drop { background: var(--accent-soft); border-radius: 6px; }

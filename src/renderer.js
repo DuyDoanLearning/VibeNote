@@ -61,6 +61,9 @@ const S = {
   filter: load('filter', { type: 'all' }),
   query: '',
   sort: load('sort', 'updated'),
+  group: load('group', 'folder'), // note list sections: folder | tag | type | none
+  collapsed: new Set(load('collapsed', [])), // collapsed list sections ("folder:Work/Specs", "tag:idea", …)
+  order: [], // notes in the order the list shows them (for ↑/↓)
   current: null, // path of the open note
   currentId: null, // file identity, survives renames done elsewhere
   meta: null, // metadata of the open note (source of truth while editing)
@@ -398,7 +401,7 @@ async function trashNote(p) {
   const wasCurrent = p === S.current;
   let next;
   if (wasCurrent) {
-    const list = visibleNotes();
+    const list = S.order.length ? S.order : visibleNotes();
     const i = list.findIndex((x) => x.path === p);
     next = list[i + 1] || list[i - 1];
   }
@@ -823,6 +826,131 @@ function filterLabel() {
     || (f.type === 'notebook' ? leafOf(f.name) : f.type === 'tag' ? `# ${f.name}` : STATUS[f.name]?.label || '');
 }
 
+// ---------- list sections (Arrange → Group by) ----------
+const GROUP_LABEL = { folder: 'notebook', tag: 'tag', type: 'type', none: 'nothing' };
+const KIND_LABEL = { note: 'Note', confluence: 'Confluence', api: 'API' };
+const TYPE_GROUPS = [['note', 'Notes'], ['confluence', 'Confluence pages'], ['api', 'API specs']];
+const segs = (p) => (p ? p.split('/') : []);
+const cmpName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+function cmpPath(a, b) {
+  const A = segs(a), B = segs(b);
+  for (let i = 0; i < Math.min(A.length, B.length); i++) { const c = cmpName(A[i], B[i]); if (c) return c; }
+  return A.length - B.length;
+}
+
+// Split the (already sorted) list into sections: [{ key, label, depth, kind?, color?, notes }].
+// One section without a heading when grouping is off or there is nothing to tell apart.
+function groupedNotes(list) {
+  const mode = S.filter.type === 'trash' ? 'none' : S.group;
+  const flat = [{ key: '', label: '', depth: 0, notes: list }];
+  if (mode === 'none' || !list.length) return flat;
+  const groups = [];
+  if (mode === 'folder') {
+    // Top-level notebooks are the big headings, notebooks inside them smaller sub-headings.
+    const base = S.filter.type === 'notebook' ? S.filter.name : '';
+    const top = base ? segs(base).length : 1;
+    const by = new Map();
+    for (const n of list) {
+      const k = n.notebook || '';
+      if (!by.has(k)) by.set(k, []);
+      by.get(k).push(n);
+    }
+    const keys = new Set();
+    for (const k of by.keys()) {
+      const s = segs(k);
+      for (let i = top; i <= s.length; i++) keys.add(s.slice(0, i).join('/'));
+    }
+    if (!base && by.has('')) groups.push({ key: '', label: 'Inbox', depth: 0, notes: by.get('') });
+    for (const k of [...keys].sort(cmpPath)) groups.push({ key: k, label: leafOf(k), depth: segs(k).length - top, notes: by.get(k) || [] });
+  } else if (mode === 'tag') {
+    const tags = [...new Set(list.flatMap((n) => n.meta.tags))].sort(cmpName);
+    for (const t of tags) groups.push({ key: t, label: t, depth: 0, color: tagColor(t), notes: list.filter((n) => n.meta.tags.includes(t)) });
+    const none = list.filter((n) => !n.meta.tags.length);
+    if (none.length) groups.push({ key: '', label: 'No tags', depth: 0, notes: none });
+  } else {
+    for (const [k, label] of TYPE_GROUPS) {
+      const notes = list.filter((n) => kindOf(n) === k);
+      if (notes.length) groups.push({ key: k, label, depth: 0, kind: k, notes });
+    }
+  }
+  return groups.length > 1 ? groups : flat;
+}
+
+function toggleSection(id) {
+  if (S.collapsed.has(id)) S.collapsed.delete(id);
+  else S.collapsed.add(id);
+  store('collapsed', [...S.collapsed]);
+  renderList();
+}
+
+function setGroup(g) {
+  S.group = g;
+  store('group', g);
+  renderList();
+  toast(g === 'none' ? 'Not grouped' : `Grouped by ${GROUP_LABEL[g]}`);
+}
+
+function sectionHead(g, mode, count, closed) {
+  const id = `${mode}:${g.key}`;
+  const h = el('li', `group-head depth-${Math.min(g.depth, 3)}`);
+  h.style.paddingLeft = `${4 + g.depth * 14}px`;
+  const chev = el('span', 'chev' + (closed ? '' : ' open'));
+  chev.innerHTML = ICON.chevron;
+  h.append(chev);
+  if (g.kind) h.append(el('span', `api-badge kind-${g.kind}`, KIND_LABEL[g.kind]));
+  if (g.color) h.append(dot(g.color));
+  h.append(el('span', 'group-label', g.label), el('span', 'group-count', count ? String(count) : ''));
+  h.title = mode === 'folder' && g.key ? g.key : g.label;
+  h.addEventListener('click', () => toggleSection(id));
+  if (mode === 'folder') makeDropTarget(h, g.key);
+  return h;
+}
+
+function noteItem(n) {
+  const li = el('li', 'note');
+  li.dataset.path = n.path;
+  li.draggable = true;
+  if (n.path === S.current) li.classList.add('active');
+
+  const head = el('div', 'note-title');
+  const kind = kindOf(n);
+  head.append(el('span', `api-badge kind-${kind}`, KIND_LABEL[kind]));
+  if (n.meta.pinned && !n.trashed) head.append(iconEl(ICON.pin, 'pin-ico'));
+  head.append(el('span', '', n.title || 'Untitled'));
+  li.append(head);
+
+  const meta = el('div', 'note-meta', n.trashed ? `Deleted ${fmtDate(n.deletedAt || n.mtime)}` : fmtDate(n.mtime));
+  const s = STATUS[n.meta.status];
+  if (s) {
+    const b = el('span', 'status-badge');
+    b.append(dot(s.color), document.createTextNode(s.label));
+    meta.append(b);
+  }
+  if (n.notebook && !(S.filter.type === 'notebook' && S.filter.name === n.notebook)) meta.append(el('span', 'badge', leafOf(n.notebook)));
+  li.append(meta);
+
+  const snip = snippet(n);
+  if (snip) li.append(el('div', 'note-snippet', snip));
+
+  if (n.meta.tags.length) {
+    const tags = el('div', 'note-tags');
+    for (const t of n.meta.tags.slice(0, 4)) {
+      const c = el('span', 'tag-chip small', t);
+      c.style.setProperty('--tag', tagColor(t));
+      tags.append(c);
+    }
+    li.append(tags);
+  }
+
+  li.addEventListener('click', () => openNote(n.path));
+  li.addEventListener('contextmenu', (e) => { e.preventDefault(); noteMenu(n); });
+  li.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/vibe-note', n.path);
+    e.dataTransfer.effectAllowed = 'copyMove';
+  });
+  return li;
+}
+
 function renderList() {
   const list = visibleNotes();
   const title = filterLabel();
@@ -831,54 +959,29 @@ function renderList() {
 
   const ul = $('#notes');
   ul.textContent = '';
+  S.order = [];
   if (!list.length) {
     const msg = S.query ? 'No matching notes' : S.filter.type === 'trash' ? 'Trash is empty' : 'No notes yet. Press ⌘N';
     ul.append(el('li', 'list-empty', msg));
     return;
   }
+  const mode = S.filter.type === 'trash' ? 'none' : S.group;
   const frag = document.createDocumentFragment();
-  for (const n of list) {
-    const li = el('li', 'note');
-    li.dataset.path = n.path;
-    li.draggable = true;
-    if (n.path === S.current) li.classList.add('active');
-
-    const head = el('div', 'note-title');
-    if (n.kind === 'api') head.append(el('span', 'api-badge', 'API'));
-    if (n.meta.pinned && !n.trashed) head.append(iconEl(ICON.pin, 'pin-ico'));
-    head.append(el('span', '', n.title || 'Untitled'));
-    li.append(head);
-
-    const meta = el('div', 'note-meta', n.trashed ? `Deleted ${fmtDate(n.deletedAt || n.mtime)}` : fmtDate(n.mtime));
-    const s = STATUS[n.meta.status];
-    if (s) {
-      const b = el('span', 'status-badge');
-      b.append(dot(s.color), document.createTextNode(s.label));
-      meta.append(b);
+  const seen = new Set();
+  let hiddenUnder = null; // a collapsed notebook hides the notebooks inside it too
+  for (const g of groupedNotes(list)) {
+    if (hiddenUnder != null && mode === 'folder' && g.key.startsWith(hiddenUnder + '/')) continue;
+    hiddenUnder = null;
+    const closed = !!g.label && S.collapsed.has(`${mode}:${g.key}`);
+    if (g.label) {
+      const count = mode === 'folder' ? list.filter((n) => n.notebook === g.key || (g.key && n.notebook.startsWith(g.key + '/'))).length : g.notes.length;
+      frag.append(sectionHead(g, mode, count, closed));
     }
-    if (n.notebook && !(S.filter.type === 'notebook' && S.filter.name === n.notebook)) meta.append(el('span', 'badge', leafOf(n.notebook)));
-    li.append(meta);
-
-    const snip = snippet(n);
-    if (snip) li.append(el('div', 'note-snippet', snip));
-
-    if (n.meta.tags.length) {
-      const tags = el('div', 'note-tags');
-      for (const t of n.meta.tags.slice(0, 4)) {
-        const c = el('span', 'tag-chip small', t);
-        c.style.setProperty('--tag', tagColor(t));
-        tags.append(c);
-      }
-      li.append(tags);
+    if (closed) { if (mode === 'folder') hiddenUnder = g.key; continue; }
+    for (const n of g.notes) {
+      frag.append(noteItem(n));
+      if (!seen.has(n.path)) { seen.add(n.path); S.order.push(n); }
     }
-
-    li.addEventListener('click', () => openNote(n.path));
-    li.addEventListener('contextmenu', (e) => { e.preventDefault(); noteMenu(n); });
-    li.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('text/vibe-note', n.path);
-      e.dataTransfer.effectAllowed = 'copyMove';
-    });
-    frag.append(li);
   }
   ul.append(frag);
   ul.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
@@ -1153,11 +1256,19 @@ async function moreMenu() {
 
 async function sortMenu() {
   const id = await api.popup([
+    { label: 'Sort by', enabled: false },
     { id: 'updated', label: 'Date Updated', checked: S.sort === 'updated' },
     { id: 'created', label: 'Date Created', checked: S.sort === 'created' },
     { id: 'title', label: 'Title', checked: S.sort === 'title' },
+    { type: 'separator' },
+    { label: 'Group by', enabled: false },
+    { id: 'group:folder', label: 'Notebook', checked: S.group === 'folder' },
+    { id: 'group:tag', label: 'Tag', checked: S.group === 'tag' },
+    { id: 'group:type', label: 'Type (Note / Confluence / API)', checked: S.group === 'type' },
+    { id: 'group:none', label: 'No Groups', checked: S.group === 'none' },
   ]);
-  if (id) setSort(id);
+  if (id?.startsWith('group:')) setGroup(id.slice(6));
+  else if (id) setSort(id);
 }
 
 function copyLink(n = currentNote()) {
@@ -1484,6 +1595,10 @@ const COMMANDS = [
   { id: 'sort-updated', title: 'Sort by Date Updated', run: () => setSort('updated') },
   { id: 'sort-created', title: 'Sort by Date Created', run: () => setSort('created') },
   { id: 'sort-title', title: 'Sort by Title', run: () => setSort('title') },
+  { id: 'group-folder', title: 'Group Notes by Notebook', when: () => !SINGLE, run: () => setGroup('folder') },
+  { id: 'group-tag', title: 'Group Notes by Tag', when: () => !SINGLE, run: () => setGroup('tag') },
+  { id: 'group-type', title: 'Group Notes by Type', when: () => !SINGLE, run: () => setGroup('type') },
+  { id: 'group-none', title: 'Don’t Group Notes', when: () => !SINGLE, run: () => setGroup('none') },
   { id: 'settings', title: 'Settings', key: '⌘,', run: openSettings },
   { id: 'toggle-agent', title: 'Toggle Claude Panel', key: '⌘J', run: () => { comments.toggle(false); agentPanel.toggle(); } },
   { id: 'claude-write', title: 'Ask Claude to Write… (/claude)', key: '⇧⌘J', when: needNote, run: () => writer.open() },
@@ -1613,7 +1728,7 @@ function bindUI() {
       renderList();
       editor.view.focus();
     } else if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      const list = visibleNotes();
+      const list = S.order;
       if (!list.length) return;
       e.preventDefault();
       const i = list.findIndex((n) => n.path === S.current);
