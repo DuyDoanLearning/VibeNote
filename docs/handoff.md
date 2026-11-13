@@ -9,9 +9,9 @@ titles or ids, colleagues' names, company names) in it.
 - `main` + newest tag **`v1.0.2-stable`** (Mermaid size fix) = the stable Markdown app.
 - **`agent`** = everything below. It is committed, pushed and installed on the owner's main Mac. The owner is using it
   for a while before it becomes stable.
-- Before making a new stable release: fix the outdated smoke test (`npm run smoke` fails on "note saved and renamed
-  from title: false" — pre-existing, the test predates the explicit title field), merge `agent` → `main`, tag
-  `vX.Y.Z-stable`, update the README version table.
+- Before making a new stable release: merge `agent` → `main`, tag `vX.Y.Z-stable`, update the README version table.
+  (The smoke test was fixed on 2026-11-13 evening: it now sets the title in the title field; `npm run smoke` passes
+  on both branches.)
 
 ## What the `agent` branch has (newest first)
 
