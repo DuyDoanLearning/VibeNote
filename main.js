@@ -1257,6 +1257,25 @@ ipcMain.handle('confluence:page', async (_e, site, id) => {
 ipcMain.handle('confluence:sidecar', async (_e, id) => {
   try { return JSON.parse(await fsp.readFile(sidecarPath(id), 'utf8')); } catch { return null; }
 });
+// For "Changes to push": each page's text as last fetched/pushed (cached by file time — sidecars can be large).
+const baseCache = new Map(); // id → { mtime, data }
+ipcMain.handle('confluence:bases', async (_e, ids) => {
+  const out = {};
+  for (const id of ids || []) {
+    try {
+      const f = sidecarPath(id);
+      const { mtimeMs } = await fsp.stat(f);
+      let hit = baseCache.get(id);
+      if (!hit || hit.mtime !== mtimeMs) {
+        const s = JSON.parse(await fsp.readFile(f, 'utf8'));
+        hit = { mtime: mtimeMs, data: { markdown: s.markdown || '', title: s.title || '', version: s.version || 0 } };
+        baseCache.set(id, hit);
+      }
+      out[id] = hit.data;
+    } catch {}
+  }
+  return out;
+});
 
 // Write a fetched page as a note (+ its sidecar). existing = path of the note already linked to this page:
 // it's updated in place (a version-history snapshot is taken first). Returns the note's path.

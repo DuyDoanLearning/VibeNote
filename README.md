@@ -89,6 +89,7 @@ The notes folder is self-contained, so it can be synced between Macs (iCloud Dri
 | `src/agent-panel.js` | The Claude chat panel (messages, tool activity, Allow/Deny cards, questions, plans) |
 | `src/ghost.js` | Inline suggestions while writing: grey text after the cursor, Tab to accept (main.js suggest:get → a small warm Claude process) |
 | `src/agent-slash.js` | Slash commands in the Claude panel (/model, /effort, /usage, /context, /mcp… + Claude Code's own commands and skills) |
+| `src/changes-ui.js` | “Changes to push”: Confluence pages edited here but not pushed — edited labels, sidebar row, Push all |
 | `src/chats-ui.js` | Claude Chats window: browse past chats, continue one in the panel (as a copy), save as a note |
 | `src-main/agent.js` | Agent host: Claude Agent SDK driving the installed Claude Code (bundled to `dist/agent.mjs`) |
 | `styles.css` / `markdown.css` | App styles / preview + export styles |

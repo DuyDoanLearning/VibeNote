@@ -11,6 +11,7 @@ import { setupResizers } from './resize.js';
 import { createWriter } from './writer.js';
 import { createApiDocs } from './apidocs.js';
 import { createChatsUI } from './chats-ui.js';
+import { createChangesUI } from './changes-ui.js';
 import { diffLines } from 'diff';
 import { splitTarget, parseOperation, apiOperations, embeddedSpecs, mdHeadings, linksTo } from './links.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
@@ -45,6 +46,7 @@ const ICON = {
   cmd: '<svg viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 17h7"/></svg>',
   api: '<svg viewBox="0 0 24 24"><path d="M8 6l-5 6 5 6M16 6l5 6-5 6M14 4l-4 16"/></svg>',
   cloud: '<svg viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 00.6-7.95A6 6 0 006.2 9.5 4.3 4.3 0 007 18z"/></svg>',
+  upload: '<svg viewBox="0 0 24 24"><path d="M12 16V5M7 10l5-5 5 5M5 19h14"/></svg>',
 };
 
 // ---------- state ----------
@@ -169,6 +171,7 @@ let saveChain = Promise.resolve();
 function onEdit() {
   S.dirty = true;
   S.touched = true;
+  changesUI?.soon();
   const n = currentNote();
   if (n) {
     n.body = editor.text();
@@ -223,6 +226,7 @@ let refreshing = null;
 let refreshAgain = false;
 async function refresh() {
   if (refreshing) { refreshAgain = true; return refreshing; }
+  setTimeout(() => changesUI?.soon(), 0);
   refreshing = (async () => {
     do {
       refreshAgain = false;
@@ -792,6 +796,13 @@ function renderSidebar() {
       onClick: () => setFilter({ type: 'notebook', name: CONFLUENCE_ROOT }),
       onMenu: () => notebookMenu(CONFLUENCE_ROOT),
     }));
+    if (S.cfChanged?.size) {
+      cfBox.append(sideRow({
+        icon: ICON.upload, label: 'Changes to push', count: S.cfChanged.size,
+        onClick: () => changesUI.open(),
+      }));
+      cfBox.lastElementChild.classList.add('cf-changes-row');
+    }
     tree(CONFLUENCE_ROOT, 0, cfBox);
   } else {
     cfBox.append(el('div', 'hint', 'Click + to fetch pages from Confluence.'));
@@ -966,6 +977,7 @@ function noteItem(n) {
   const head = el('div', 'note-title');
   const kind = kindOf(n);
   head.append(el('span', `api-badge kind-${kind}`, KIND_LABEL[kind]));
+  if (S.cfChanged?.has(n.path)) head.append(el('span', 'edited-badge', 'edited'));
   if (n.meta.pinned && !n.trashed) head.append(iconEl(ICON.pin, 'pin-ico'));
   head.append(el('span', '', n.title || 'Untitled'));
   li.append(head);
@@ -1665,6 +1677,7 @@ const COMMANDS = [
   { id: 'empty-trash', title: 'Empty Trash', run: emptyTrash },
   { id: 'confluence-fetch', title: 'Fetch from Confluence…', when: () => !SINGLE, run: () => confluence.openFetch() },
   { id: 'confluence-push', title: 'Push to Confluence…', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.push() },
+  { id: 'confluence-changes', title: 'Changes to Push to Confluence…', when: () => !SINGLE, run: () => changesUI.open() },
   { id: 'confluence-publish', title: 'Publish as a New Confluence Page…', when: () => !isTrashed() && !!currentNote() && !confluenceInfo(S.meta) && !isApi(), run: () => confluence.publishNote() },
   { id: 'confluence-pull', title: 'Pull Latest from Confluence', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.pull() },
   { id: 'confluence-open', title: 'Open in Confluence', when: () => !!confluenceInfo(S.meta), run: () => confluence.openInConfluence() },
@@ -1872,6 +1885,17 @@ const agentPanel = createAgentPanel({
   // Claude edits files directly; the folder watcher picks that up, this just makes it snappy.
   onNoteMaybeChanged: () => { clearTimeout(refreshSoon); refreshSoon = setTimeout(refresh, 150); },
   openChats: () => chatsUI.open(),
+});
+
+// "Changes to push": Confluence pages edited here but not pushed yet.
+var changesUI = createChangesUI({
+  api, S, $, el, overlay, closeOverlay, toast, save, openNote, refresh,
+  editorText: () => editor.text(),
+  isConfluencePage: (n) => confluenceInfo(n.meta)?.kind === 'page',
+  idOf: (n) => confluenceInfo(n.meta)?.id,
+  pushOne: async (p) => { await openNote(p); confluence.push(); },
+  pushMany: (list, onStep) => confluence.pushMany(list, onStep),
+  rerender: () => { renderSidebar(); renderList(); },
 });
 
 // Claude Chats window: past Claude Code chats → read, continue in the panel, save as a note.

@@ -425,6 +425,36 @@ export function createConfluenceUI(ctx) {
     });
   }
 
+  // ---------- Push several pages (the "Changes to push" window) ----------
+  // onStep(note, state, text): state = 'wait' | 'ok' | 'conflict' | 'error'. Never overwrites someone else's newer version.
+  async function pushMany(list, onStep) {
+    await save();
+    for (const note of list) {
+      onStep(note, 'wait', 'Pushing…');
+      try {
+        const fresh = S.notes.find((n) => n.path === note.path) || note;
+        const info = confluenceInfo(fresh.meta);
+        if (!info || info.kind !== 'page') { onStep(note, 'error', 'Not a Confluence page'); continue; }
+        const side = await cf.sidecar(info.id);
+        if (!side) { onStep(note, 'error', 'Its original copy is missing — fetch it from Confluence again first.'); continue; }
+        const body = fresh.path === S.current ? editorText() : fresh.body;
+        const r = toConfluence(body, side, { resolveLink });
+        const title = fresh.meta.title || side.title;
+        if (r.unchanged && title === side.title) { onStep(note, 'ok', 'Nothing to push'); continue; }
+        const res = await cf.push({ site: info.site, id: info.id, title, html: r.html, version: info.version || side.version, draft: false });
+        if (res.conflict) {
+          onStep(note, 'conflict', `Someone changed it in Confluence meanwhile (now version ${res.current}) — not pushed. Open it and use Pull Latest.`);
+          continue;
+        }
+        await fetchPage({ site: info.site, spaceKey: '', id: info.id, notebook: fresh.notebook, existing: fresh.path });
+        onStep(note, 'ok', `Pushed${res.version ? ` (version ${res.version})` : ''}${r.problems.length ? ` · ⚠️ ${r.problems.join(' ')}` : ''}`);
+      } catch (e) {
+        onStep(note, 'error', errText(e));
+      }
+    }
+    await refresh();
+  }
+
   // ---------- Pull latest ----------
   async function pull() {
     const note = currentNote();
@@ -522,6 +552,7 @@ export function createConfluenceUI(ctx) {
     pull,
     publishNote,
     locationForNotebook,
+    pushMany,
     decorate,
     downloadPictures,
     info: () => confluenceInfo(S.meta),

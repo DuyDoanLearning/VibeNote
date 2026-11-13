@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld('vibe', {
     tree: invoke('confluence:tree'),
     page: invoke('confluence:page'),
     sidecar: invoke('confluence:sidecar'),
+    bases: invoke('confluence:bases'),
     save: invoke('confluence:save'),
     mkdir: invoke('confluence:mkdir'),
     push: invoke('confluence:push'),

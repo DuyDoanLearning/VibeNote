@@ -795,3 +795,24 @@ body.api-note #status-pick, body.api-note #tag-list, body.api-note #tag-input, b
 
 /* Chat items never shrink to fit the panel (the log scrolls instead) */
 .agent-log > * { flex-shrink: 0; }
+
+/* Changes to push (Confluence pages edited here) */
+.edited-badge { flex: none; font-size: 9.5px; font-weight: 700; color: #c2410c; border: 1px solid #fdba74; background: #fff7ed; border-radius: 4px; padding: 0 4px; margin-right: 2px; }
+.cf-changes-row .label, .cf-changes-row .ico { color: #c2410c; }
+.cf-changes-row .count { color: #c2410c; font-weight: 700; }
+.changes-win { width: min(820px, 95vw); max-height: 86vh; display: flex; flex-direction: column; }
+.changes-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.changes-item { padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.changes-item:last-child { border-bottom: 0; }
+.changes-top { display: flex; align-items: center; gap: 8px; }
+.changes-title { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.changes-where { font-size: 11.5px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.changes-stat { font: 11px var(--mono); white-space: nowrap; }
+.changes-stat .a { color: #10b981; } .changes-stat .d { color: #ef4444; }
+.changes-top .spacer { flex: 1; }
+.changes-top .btn { font-size: 12px; padding: 3px 9px; }
+.changes-result { font-size: 12px; margin-top: 4px; }
+.changes-result.ok { color: #059669; } .changes-result.conflict { color: #c2410c; } .changes-result.error { color: #dc2626; } .changes-result.wait { color: var(--muted); }
+.changes-diff { margin: 6px 0 2px; padding: 8px 10px; background: var(--code-bg); border-radius: 7px; font: 11px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
+.changes-diff .add { color: #059669; } .changes-diff .del { color: #dc2626; } .changes-diff .ctx { color: var(--faint); }
+.changes-empty { color: var(--faint); text-align: center; padding: 30px 10px; font-size: 13px; }
