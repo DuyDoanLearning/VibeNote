@@ -30,7 +30,8 @@
 .markdown th { background: var(--panel); text-align: left; }
 .markdown .math-block { overflow-x: auto; text-align: center; }
 .markdown .mermaid { text-align: center; }
-.markdown .mermaid svg { max-width: 100%; height: auto; }
+/* Undo the app's 16px icon style (styles.css `svg {…}`) so diagrams get their real size and colours. */
+.markdown .mermaid svg { width: 100%; max-width: 100%; height: auto; fill: initial; stroke: initial; stroke-width: initial; stroke-linecap: initial; stroke-linejoin: initial; }
 .markdown .mermaid-error { color: #dc2626; font: 12px var(--mono); padding: 10px; border: 1px dashed #dc2626; border-radius: 8px; text-align: left; }
 
 /* highlight.js tokens — colours come from the theme (fallbacks used by exported files) */
