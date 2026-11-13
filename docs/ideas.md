@@ -20,6 +20,9 @@ Ideas discussed with the owner (2026-11-13), not yet decided or built. Owner's t
 11. **Graph view** of note links.
 12. **Talk your ideas in**: dictate (Vietnamese or English) → Claude turns it into a spec note.
 
+## Project hub
+15. **Project vibe coding** (owner, 2026-11-13, still forming): one place per project for all its docs (incl. Confluence pages), where the owner writes and controls the notes and the AI reads them, writes code and reports back as notes.
+
 ## Fun
 13. "Explain like I'm 5" toggle on explanation notes.
 14. Weekly recap card.

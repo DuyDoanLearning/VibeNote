@@ -141,6 +141,20 @@ export async function postProcess(root, { dir, dark, onTask, copyButtons = false
     grab(/\b(?:h|height):\s*(\d+(?:px|%)?)/i, 'height');
     img.setAttribute('alt', alt);
   });
+  // ```confluence boxes (parts of a Confluence page Markdown can't show, kept as-is on push) → a labelled box
+  root.querySelectorAll('pre > code.language-confluence').forEach((code) => {
+    const [first, ...rest] = code.textContent.trim().split('\n');
+    const box = document.createElement('div');
+    box.className = 'confluence-kept';
+    const label = document.createElement('div');
+    label.className = 'ck-label';
+    label.textContent = first.replace(/^#\d+\s*/, '').replace(/\s*·\s*kept in Confluence\s*$/, '');
+    const note = document.createElement('div');
+    note.className = 'ck-note';
+    note.textContent = rest.length ? rest.join(' ') : 'Shown in Confluence · kept unchanged when you push';
+    box.append(label, note);
+    code.parentElement.replaceWith(box);
+  });
   if (copyButtons) {
     root.querySelectorAll('pre > code').forEach((code) => {
       if (code.classList.contains('language-mermaid')) return;

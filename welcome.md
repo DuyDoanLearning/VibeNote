@@ -19,6 +19,12 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - The title lives in the big field above the editor; it's also the file name
 - Link notes with double brackets, like [[Welcome to VibeNote]]
 
+## Confluence
+
+- Click **+** next to **Confluence** in the sidebar, paste a page link, tick the pages you want and **Fetch**. Sub-pages become notebooks.
+- Edit the note, then click **Push** to send your changes back. Only the parts you changed are updated; diagrams, macros and images (the 🔒 boxes) stay as they are.
+- If someone changed the page in Confluence meanwhile, Push stops. Use **Pull Latest from Confluence** (⌘K) to refresh.
+
 ## Write
 
 - [x] Paste or drag images straight into a note

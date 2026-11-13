@@ -49,16 +49,24 @@ The HTML format gives every block a hidden `data-local-id`, and Atlassian says H
 | @mention, date, anything else | Protected block: shown as a labelled chip/box, put back unchanged on push |
 | Table with lists or several paragraphs in a cell | Markdown table using `<br>` / inline HTML in the cell |
 
-Per-note sync info is kept in front matter (plain file, syncable): `confluence: { site, id, version, url }`. The original HTML of protected blocks and the block-id map live in a plain sidecar file in the notebook (`.confluence/<pageId>.json`), next to `.assets/`.
+Per-note sync info is kept in front matter (plain file, syncable): `confluence: <page url>` and `confluence-version: N` (plus `confluence-type:` for whiteboards etc.). The page's original blocks (`{md, html}` each), the protected elements and the @mentioned people live in `<notes folder>/.confluence/<pageId>.json`, so they follow the note when it is moved.
+
+### How it's built
+- `src-main/atlassian.js` — VibeNote's own MCP client + OAuth (sign-in encrypted with the Keychain).
+- `main.js` → `confluence:*` IPC: tree, page, save note + sidecar, push (with the version check).
+- `src/confluence.js` — the converter. `fromConfluence(html)` → Markdown + blocks; `toConfluence(markdown, sidecar)` diffs the note's lines against the fetched blocks (LCS), keeps unchanged blocks' original HTML and converts only changed regions (tables get their widths / row numbers / header style back; ```confluence boxes are swapped back by their `#n`).
+- `src/confluence-ui.js` — Fetch window (tick pages), Push window (summary, Publish / Save as draft), Pull latest.
+- Mentions show as `[@Name](mention)`; the account id comes from the sidecar on push (unknown names stay plain text).
+- After a publish the page is re-read, so the note and sidecar always match what Confluence stored.
 
 ## Build order
 
 - [x] **1. Connection test (read-only).** Passed 2026-11-13: sign-in, page read, 70-item tree read. Code: `src-main/atlassian.js` (MCP client + OAuth, sign-in encrypted with the macOS Keychain in userData).
-- [ ] **2. Fetch.** "From Confluence…" command: paste a link → choose "this page only" or "with all sub-pages" → notebooks and notes, protected blocks, natural matches.
-- [ ] **3. Push.** "Push to Confluence" button: shows what will change, changes only edited blocks, stops if the page version changed, option "save as Confluence draft". "Pull latest" to refresh a note.
+- [x] **2. Fetch.** (2026-11-13: 61 real pages fetched; converter round-trips all 61 pages exactly.) "From Confluence…" command: paste a link → choose "this page only" or "with all sub-pages" → notebooks and notes, protected blocks, natural matches.
+- [x] **3. Push.** (2026-11-13: tested on a private scratch page — edits arrive, untouched blocks byte-identical, conflict refused.) "Push to Confluence" button: shows what will change, changes only edited blocks, stops if the page version changed, option "save as Confluence draft". "Pull latest" to refresh a note.
 - [ ] **4. Claude panel.** Claude knows the protected-block rules and doesn't break them.
 - [ ] **5. Extras.** Live Jira chips, comments panel (read-only), new Confluence page from a note.
-- Later: Jira lists in a note, create Jira tickets from a checklist, open a Jira ticket as a note, @mention autocomplete, move pages by dragging, replying to comments.
+- Later: 3-way merge when the page changed in Confluence (we have the base copy), a "changed since fetch" dot in the note list, keep Confluence's page order in the note list, Jira lists in a note, create Jira tickets from a checklist, open a Jira ticket as a note, @mention autocomplete, move pages by dragging, replying to comments.
 
 ## Safety rules while building
 

@@ -162,7 +162,8 @@ export async function listTools() {
 /** Call an Atlassian MCP tool; returns parsed JSON when the tool answers with JSON text. */
 export async function call(name, args) {
   const c = await connect();
-  const res = await c.callTool({ name, arguments: args });
+  // Big pages can take Atlassian over a minute (the SDK's default timeout).
+  const res = await c.callTool({ name, arguments: args }, undefined, { timeout: 150_000 });
   const text = (res.content || []).filter((p) => p.type === 'text').map((p) => p.text).join('\n');
   if (res.isError) throw new Error(text || `${name} failed`);
   try { return JSON.parse(text); } catch { return text; }

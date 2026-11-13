@@ -23,6 +23,13 @@
           </button>
         </div>
         <div id="notebooks"></div>
+        <div class="section-head">
+          <span>Confluence</span>
+          <button id="cf-fetch" class="mini" title="Fetch from Confluence">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+        <div id="confluence"></div>
         <div class="section-head"><span>Status</span></div>
         <div id="statuses"></div>
         <div class="section-head"><span>Tags</span></div>
@@ -81,6 +88,10 @@
             <button data-mode="split" title="Split (⌘2)">Split</button>
             <button data-mode="preview" title="Preview only (⌘3)">Preview</button>
           </div>
+          <button id="push-btn" class="btn push-btn" title="Push your changes to Confluence" hidden>
+            <svg viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 00.6-7.95A6 6 0 006.2 9.5 4.3 4.3 0 007 18zM12 16v-6M9.5 12.5L12 10l2.5 2.5"/></svg>
+            Push
+          </button>
           <button id="agent-btn" class="icon agent-toggle" title="Claude (⌘J)">
             <svg viewBox="0 0 24 24"><path d="M12 3c.5 4.5 2.5 6.5 7 7-4.5.5-6.5 2.5-7 7-.5-4.5-2.5-6.5-7-7 4.5-.5 6.5-2.5 7-7z"/><path d="M19 15c.2 1.6.9 2.3 2.5 2.5-1.6.2-2.3.9-2.5 2.5-.2-1.6-.9-2.3-2.5-2.5 1.6-.2 2.3-.9 2.5-2.5z"/></svg>
           </button>

@@ -4,6 +4,8 @@ import { renderMarkdown, postProcess, setLinkResolver } from './markdown.js';
 import { parseQuery, matchQuery, fuzzy } from './search.js';
 import { applyTheme } from './theme.js';
 import { createAgentPanel } from './agent-panel.js';
+import { createConfluenceUI, CONFLUENCE_ROOT } from './confluence-ui.js';
+import { confluenceInfo } from './confluence.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
 import { moveLineUp, moveLineDown, copyLineDown, deleteLine } from '@codemirror/commands';
 
@@ -34,6 +36,7 @@ const ICON = {
   pin: '<svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3zM12 15v6"/></svg>',
   note: '<svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5"/></svg>',
   cmd: '<svg viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 17h7"/></svg>',
+  cloud: '<svg viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 00.6-7.95A6 6 0 006.2 9.5 4.3 4.3 0 007 18z"/></svg>',
 };
 
 // ---------- state ----------
@@ -649,8 +652,8 @@ function renderSidebar() {
 
   const wrap = $('#notebooks');
   wrap.textContent = '';
-  const tree = (parent, depth) => {
-    for (const nb of S.notebooks.filter((x) => parentOf(x) === parent)) {
+  const tree = (parent, depth, target = wrap) => {
+    for (const nb of S.notebooks.filter((x) => parentOf(x) === parent && x !== CONFLUENCE_ROOT)) {
       const kids = S.notebooks.some((x) => parentOf(x) === nb);
       const open = S.expanded.has(nb);
       const row = sideRow({
@@ -667,12 +670,27 @@ function renderSidebar() {
       }
       row.prepend(chev);
       makeDropTarget(row, nb);
-      wrap.append(row);
-      if (kids && open) tree(nb, depth + 1);
+      target.append(row);
+      if (kids && open) tree(nb, depth + 1, target);
     }
   };
   tree('', 0);
-  if (!S.notebooks.length) wrap.append(el('div', 'hint', 'Notebooks are folders. Click + to add one.'));
+  if (!S.notebooks.some((x) => x !== CONFLUENCE_ROOT)) wrap.append(el('div', 'hint', 'Notebooks are folders. Click + to add one.'));
+
+  // Pages fetched from Confluence live in the "Confluence" notebook, shown as their own section.
+  const cfBox = $('#confluence');
+  cfBox.textContent = '';
+  if (S.notebooks.includes(CONFLUENCE_ROOT)) {
+    cfBox.append(sideRow({
+      icon: ICON.cloud, label: 'All pages', count: notes.filter((n) => inBook(n, CONFLUENCE_ROOT)).length,
+      active: f.type === 'notebook' && f.name === CONFLUENCE_ROOT,
+      onClick: () => setFilter({ type: 'notebook', name: CONFLUENCE_ROOT }),
+      onMenu: () => notebookMenu(CONFLUENCE_ROOT),
+    }));
+    tree(CONFLUENCE_ROOT, 0, cfBox);
+  } else {
+    cfBox.append(el('div', 'hint', 'Click + to fetch pages from Confluence.'));
+  }
 
   const st = $('#statuses');
   st.textContent = '';
@@ -787,6 +805,7 @@ function renderToolbar() {
   sel.disabled = !n || n.trashed;
   $('#back-btn').disabled = !S.back.length;
   $('#fwd-btn').disabled = !S.forward.length;
+  $('#push-btn').hidden = !n || !!n.trashed || confluenceInfo(S.meta)?.kind !== 'page';
   $('#pin-btn').classList.toggle('on', !!S.meta?.pinned);
   $('#pin-btn').title = S.meta?.pinned ? 'Unpin note (⌥⌘P)' : 'Pin note (⌥⌘P)';
   $$('#modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === S.mode));
@@ -999,6 +1018,12 @@ async function moreMenu() {
     { id: 'open-window', label: 'Open in New Window', enabled: !SINGLE },
     { id: 'copy-link', label: 'Copy Link' },
     { id: 'history', label: 'Version History…' },
+    ...(confluenceInfo(S.meta)?.kind === 'page' ? [
+      { type: 'separator' },
+      { id: 'confluence-push', label: 'Push to Confluence…' },
+      { id: 'confluence-pull', label: 'Pull Latest from Confluence' },
+      { id: 'confluence-open', label: 'Open in Confluence' },
+    ] : []),
     { type: 'separator' },
     { id: 'export-html', label: 'Export as HTML…' },
     { id: 'export-pdf', label: 'Export as PDF…' },
@@ -1294,6 +1319,11 @@ const COMMANDS = [
   { id: 'go-inbox', title: 'Go to Inbox', key: '⇧⌘I', when: () => !SINGLE, run: () => setFilter({ type: 'inbox' }) },
   { id: 'go-trash', title: 'Go to Trash', key: '⇧⌘T', when: () => !SINGLE, run: () => setFilter({ type: 'trash' }) },
   { id: 'empty-trash', title: 'Empty Trash', run: emptyTrash },
+  { id: 'confluence-fetch', title: 'Fetch from Confluence…', when: () => !SINGLE, run: () => confluence.openFetch() },
+  { id: 'confluence-push', title: 'Push to Confluence…', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.push() },
+  { id: 'confluence-pull', title: 'Pull Latest from Confluence', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.pull() },
+  { id: 'confluence-open', title: 'Open in Confluence', when: () => !!confluenceInfo(S.meta), run: () => confluence.openInConfluence() },
+  { id: 'confluence-signout', title: 'Sign Out of Atlassian', run: () => confluence.signOut() },
   { id: 'mode-edit', title: 'View: Editor Only', key: '⌘1', run: () => setMode('edit') },
   { id: 'mode-split', title: 'View: Split', key: '⌘2', run: () => setMode('split') },
   { id: 'mode-preview', title: 'View: Preview Only', key: '⌘3', run: () => setMode('preview') },
@@ -1346,6 +1376,8 @@ function focusSearch() {
 // ---------- wiring ----------
 function bindUI() {
   $('#add-notebook').addEventListener('click', () => newNotebook());
+  $('#cf-fetch').addEventListener('click', () => confluence.openFetch());
+  $('#push-btn').addEventListener('click', () => confluence.push());
   $('#folder-btn').addEventListener('click', chooseFolder);
   $('#new-note').addEventListener('click', () => newNote());
   $('#empty-new').addEventListener('click', () => newNote());
@@ -1450,6 +1482,11 @@ function bindUI() {
 }
 
 // ---------- Claude panel ----------
+const confluence = createConfluenceUI({
+  api, S, $, el, esc, overlay, closeOverlay, toast, save, refresh, setFilter, openNote, currentNote,
+  editorText: () => editor.text(),
+});
+
 let refreshSoon = null;
 const agentPanel = createAgentPanel({
   api,

@@ -440,3 +440,27 @@ body.agent-open #agent-btn { color: var(--accent); background: var(--accent-soft
 .agent-input:focus { border-color: var(--accent); }
 .agent-status { font-size: 11px; color: var(--faint); min-height: 14px; }
 #agent.busy .agent-status::before { content: '● '; color: var(--accent); animation: blink 1s steps(1) infinite; }
+
+/* ---------- Confluence sync (agent branch) ---------- */
+.push-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; font-size: 12.5px; background: var(--accent); color: #fff; }
+.push-btn svg { width: 15px; height: 15px; stroke: currentColor; }
+.push-btn[hidden] { display: none; }
+.cf-fetch, .cf-push { width: min(620px, 94vw); }
+.cf-row { display: flex; gap: 8px; }
+.cf-url { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 13px; outline: none; }
+.cf-url:focus { border-color: var(--accent); }
+.cf-msg { font-size: 12.5px; margin-top: 10px; color: var(--muted); }
+.cf-msg:empty { display: none; }
+.cf-msg.error { color: #dc2626; }
+.cf-msg.wait::before { content: '⏳ '; }
+.cf-tree { margin-top: 12px; max-height: 46vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); padding: 4px; }
+.cf-item { display: flex; align-items: center; gap: 7px; padding: 4px 8px; border-radius: 6px; font-size: 13px; cursor: default; }
+.cf-item:hover { background: var(--hover); }
+.cf-item input { accent-color: var(--accent); margin: 0; }
+.cf-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cf-tag { font-size: 11px; color: var(--faint); white-space: nowrap; }
+.cf-tools { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.cf-count { margin-left: auto; font-size: 12px; color: var(--muted); }
+.cf-summary { margin: 0; padding-left: 4px; list-style: none; font-size: 13.5px; line-height: 1.7; }
+.cf-summary .warn { color: #b45309; }
+.cf-note { font-size: 12px; color: var(--faint); margin: 10px 0 0; }

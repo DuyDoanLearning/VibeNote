@@ -72,3 +72,18 @@
   .markdown pre, .markdown img, .markdown .mermaid, .markdown table { break-inside: avoid; }
   .markdown h1, .markdown h2, .markdown h3 { break-after: avoid; }
 }
+
+/* Confluence pages (agent branch): kept blocks, mentions, status lozenges */
+.markdown .confluence-kept { margin: 0 0 1em; padding: 10px 14px; border: 1px dashed var(--border); border-radius: 8px; background: var(--panel); font-size: .9em; }
+.markdown .confluence-kept .ck-label { font-weight: 600; }
+.markdown .confluence-kept .ck-label::before { content: '🔒 '; }
+.markdown .confluence-kept .ck-note { color: var(--muted); font-size: .92em; margin-top: 2px; }
+.markdown a:not([href]) { color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 0 3px; text-decoration: none; }
+.markdown span[data-type="status"] { display: inline-block; font-size: .78em; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; padding: 0 5px; border-radius: 3px; background: var(--hover); }
+.markdown span[data-type="status"][data-color="green"] { background: #dcfff1; color: #216e4e; }
+.markdown span[data-type="status"][data-color="blue"] { background: #e9f2ff; color: #0055cc; }
+.markdown span[data-type="status"][data-color="red"] { background: #ffeceb; color: #ae2e24; }
+.markdown span[data-type="status"][data-color="yellow"] { background: #fff7d6; color: #7f5f01; }
+.markdown span[data-type="status"][data-color="purple"] { background: #f3f0ff; color: #5e4db2; }
+.markdown td ul, .markdown td ol { margin: 0; padding-left: 1.2em; }
+.markdown a[href="mention"] { color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 0 3px; text-decoration: none; pointer-events: none; }

@@ -804,6 +804,108 @@ ipcMain.handle('agent:permission-reply', (_e, id, reply) => {
 
 app.on('before-quit', () => { for (const st of chats.values()) st.chat.close(); });
 
+// ---------- Confluence sync (spec: docs/confluence-spec.md) ----------
+// VibeNote talks to Atlassian's MCP server itself (src-main/atlassian.js → dist/atlassian.mjs). Fetched pages are
+// normal notes; the page link and version live in front matter. The original HTML of each page's blocks lives in
+// <root>/.confluence/<pageId>.json so Push can send back everything the user didn't change, unchanged.
+let atlMod = null;
+const loadAtlassian = async () => (atlMod ||= await import(pathToFileURL(path.join(__dirname, 'dist', 'atlassian.mjs')).href));
+const sidecarPath = (id) => {
+  const clean = String(id).replace(/\D/g, '');
+  if (!clean) throw new Error('Bad Confluence page id');
+  return path.join(rootDir(), '.confluence', `${clean}.json`);
+};
+
+function parseConfluenceUrl(url) {
+  let u;
+  try { u = new URL(String(url).trim()); } catch { throw new Error('That doesn’t look like a link.'); }
+  if (!/\.atlassian\.net$/i.test(u.host)) throw new Error('Paste a Confluence Cloud link (…atlassian.net/wiki/…).');
+  const id = /\/pages\/(?:edit-v2\/|edit\/)?(\d+)/.exec(u.pathname)?.[1] || u.searchParams.get('pageId');
+  if (!id) throw new Error('No page in that link. Open the page in Confluence and copy the address from the browser.');
+  return { site: u.host.toLowerCase(), id, spaceKey: /\/spaces\/([^/]+)/.exec(u.pathname)?.[1] || '' };
+}
+const cursorOf = (r) => {
+  const next = r?._links?.next || r?.nextCursor || r?.cursor;
+  if (!next) return null;
+  try { return new URL(next, 'https://x').searchParams.get('cursor') || next; } catch { return next; }
+};
+
+ipcMain.handle('confluence:status', async () => (await loadAtlassian()).isSignedIn());
+ipcMain.handle('confluence:sign-out', async () => (await loadAtlassian()).signOut());
+
+// A page and everything under it (pages, folders, whiteboards…), for the "choose pages" list.
+ipcMain.handle('confluence:tree', async (_e, url) => {
+  const { site, id, spaceKey } = parseConfluenceUrl(url);
+  const atl = await loadAtlassian();
+  const page = await atl.call('getConfluencePage', { cloudId: site, pageId: id, contentFormat: 'markdown' });
+  const items = [];
+  let cursor = null;
+  for (let i = 0; i < 20; i++) {
+    const r = await atl.call('getConfluencePageDescendants', { cloudId: site, pageId: id, depth: 10, limit: 250, ...(cursor && { cursor }) });
+    items.push(...(r.results || []));
+    cursor = cursorOf(r);
+    if (!cursor) break;
+  }
+  const pick = ({ id, title, type, status, parentId, depth, childPosition }) => ({ id: String(id), title, type, status, parentId: String(parentId || ''), depth, childPosition });
+  return {
+    site,
+    spaceKey,
+    root: { id: String(page.id), title: page.title, type: 'page', status: page.status, depth: 0 },
+    items: items.map(pick),
+  };
+});
+
+ipcMain.handle('confluence:page', async (_e, site, id) => {
+  const p = await (await loadAtlassian()).call('getConfluencePage', { cloudId: site, pageId: String(id), contentFormat: 'html' });
+  return { id: String(p.id), title: p.title, status: p.status, version: p.version?.number || 0, body: p.body || '', spaceId: p.spaceId, parentId: p.parentId };
+});
+
+ipcMain.handle('confluence:sidecar', async (_e, id) => {
+  try { return JSON.parse(await fsp.readFile(sidecarPath(id), 'utf8')); } catch { return null; }
+});
+
+// Write a fetched page as a note (+ its sidecar). existing = path of the note already linked to this page:
+// it's updated in place (a version-history snapshot is taken first). Returns the note's path.
+ipcMain.handle('confluence:save', async (_e, { notebook, existing, meta, body, sidecar }) => {
+  const title = String(meta.title || '').trim() || 'Untitled';
+  let file;
+  if (existing) {
+    file = inRoot(existing);
+    await snapshot(file, true).catch(() => {});
+    const desired = uniquePath(path.dirname(file), safeName(title), file);
+    if (desired !== file) { await fsp.rename(file, desired); file = desired; }
+  } else {
+    const dir = notebookDir(notebook);
+    await fsp.mkdir(dir, { recursive: true });
+    file = uniquePath(dir, safeName(title));
+  }
+  if (sidecar) {
+    const sc = sidecarPath(sidecar.id);
+    await fsp.mkdir(path.dirname(sc), { recursive: true });
+    await fsp.writeFile(sc, JSON.stringify(sidecar));
+  }
+  await fsp.writeFile(file, serializeNote({ ...meta, title }, body, path.basename(file, '.md')), 'utf8');
+  return file;
+});
+
+// Make an (empty) notebook folder for a Confluence folder or a page with sub-pages.
+ipcMain.handle('confluence:mkdir', async (_e, notebook) => {
+  await fsp.mkdir(notebookDir(notebook), { recursive: true });
+});
+
+// Publish (or save as a Confluence draft). Refuses if the page changed in Confluence since it was fetched.
+ipcMain.handle('confluence:push', async (_e, { site, id, title, html, version, draft }) => {
+  const atl = await loadAtlassian();
+  const now = await atl.call('getConfluencePage', { cloudId: site, pageId: String(id), contentFormat: 'markdown' });
+  const current = now.version?.number || 0;
+  if (version && current !== version) return { conflict: true, current, at: now.version?.createdAt || '' };
+  const r = await atl.call('updateConfluencePage', {
+    cloudId: site, pageId: String(id), title, body: html, contentFormat: 'html',
+    status: draft ? 'draft' : 'current', versionMessage: 'Edited in VibeNote',
+  });
+  return { ok: true, version: r?.version?.number || null };
+});
+
 ipcMain.on('app:flushed', (e) => {
   const w = winOf(e);
   if (w && w.flushDone) w.flushDone();
