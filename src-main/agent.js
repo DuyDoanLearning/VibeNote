@@ -102,6 +102,7 @@ export class AgentChat {
           pathToClaudeCodeExecutable: o.claudePath,
           env,
           model: o.model || undefined,
+          ...(o.effort && { effort: o.effort }),
           permissionMode: o.permissionMode || 'default',
           resume: o.resume || undefined,
           // Continuing a chat from the Claude Chats window: work on a copy, so a Terminal session of it is never disturbed.
@@ -170,6 +171,8 @@ export class AgentChat {
             kind: 'task', toolUseId: m.tool_use_id, description: m.description, lastTool: m.last_tool_name,
             summary: m.summary, tokens: m.usage?.total_tokens, steps: m.usage?.tool_uses, status: m.patch?.status || m.status,
           });
+        } else if (m.subtype === 'local_command_output') {
+          emit({ kind: 'text', text: String(m.content || '') }); // output of a slash command (e.g. /compact, /cost)
         } else if (m.subtype === 'compact_boundary') {
           emit({ kind: 'note', text: 'Conversation compacted to save space' });
         } else if (m.subtype === 'thinking_tokens') {
@@ -177,6 +180,12 @@ export class AgentChat {
           emit({ kind: 'tokens', output: (this.tokBase || 0) + (m.estimated_tokens || 0) });
         }
         break;
+      case 'rate_limit_event': {
+        const info = m.rate_limit_info || {};
+        this.rateLimits = { ...this.rateLimits, [info.rateLimitType || 'five_hour']: info };
+        if (info.status && info.status !== 'allowed') emit({ kind: 'rate_limit', info });
+        break;
+      }
       case 'tool_progress':
         if (m.parent_tool_use_id) emit({ kind: 'sub_tool', parent: m.parent_tool_use_id, name: m.tool_name });
         else emit({ kind: 'tool_progress', id: m.tool_use_id, seconds: m.elapsed_time_seconds });
@@ -260,6 +269,23 @@ export class AgentChat {
 
   async setMode(mode) {
     try { await this.q?.setPermissionMode(mode); } catch {}
+  }
+
+  // ---------- for slash commands in the panel ----------
+  commands() { return this.q.supportedCommands(); }
+  models() { return this.q.supportedModels(); }
+  setModel(model) { return this.q.setModel(model || undefined); }
+  setEffort(level) { return this.q.applyFlagSettings({ effortLevel: level || null }); }
+  contextUsage() { return this.q.getContextUsage(); }
+  mcpStatus() { return this.q.mcpServerStatus(); }
+  // Plan limits + session cost (the data behind Claude Code's /usage). The SDK marks this API experimental, so fall
+  // back to the last rate-limit info seen during the chat.
+  async usage() {
+    try {
+      return await this.q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+    } catch (e) {
+      return { error: e?.message || String(e), fallback: this.rateLimits || null };
+    }
   }
 
   close() {

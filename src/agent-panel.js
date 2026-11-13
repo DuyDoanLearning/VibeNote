@@ -1,5 +1,6 @@
 // The Claude chat panel: streaming replies, tool activity, Approve/Deny cards, questions, plans.
 import { renderMarkdown } from './markdown.js';
+import { createSlash, prettyModel } from './agent-slash.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const el = (tag, cls, text) => {
@@ -42,6 +43,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     <div class="titlebar agent-head">
       <div class="agent-title"><span class="spark">✦</span> Claude <span class="agent-project"></span></div>
       <div class="spacer"></div>
+      <button class="agent-model" title="Model (/model)">Default</button>
       <select class="agent-mode" title="What Claude may do without asking">
         <option value="default">Ask every time</option>
         <option value="acceptEdits">Auto-approve edits</option>
@@ -56,7 +58,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     <div class="agent-foot">
       <div class="agent-quick"></div>
       <div class="agent-input-wrap">
-        <textarea class="agent-input" rows="1" placeholder="Ask Claude… (↵ to send, ⇧↵ new line)"></textarea>
+        <textarea class="agent-input" rows="1" placeholder="Ask Claude… (/ for commands, ↵ to send, ⇧↵ new line)"></textarea>
         <button class="btn primary agent-send" title="Send (↵)">Send</button>
         <button class="btn agent-stop" title="Stop" hidden>Stop</button>
       </div>
@@ -68,6 +70,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
   const status = $('.agent-status');
 
   let ctx = null; // { key, notebook, repo, claudePath, busy, items }
+  let loadedKey = null;
   let live = null; // streaming assistant bubble
   let liveText = '';
   let liveTimer = null;
@@ -509,6 +512,8 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     banner.textContent = ctx.claudePath ? '' : 'Claude Code isn’t installed (or can’t be found). Install it from claude.com/claude-code, run `claude` once in Terminal to log in, then reopen this panel.';
     const s = await api.getSettings();
     $('.agent-mode').value = s.agentMode || 'default';
+    showModel(s.agentModel || '');
+    if (ctx.key !== loadedKey) { slash.reset(); loadedKey = ctx.key; }
     renderHistory(ctx.items || []);
     setBusy(!!ctx.busy);
   }
@@ -516,6 +521,18 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
   async function send(text, label) {
     text = text.trim();
     if (!text) return;
+    slash.close();
+    if (text.startsWith('/')) {
+      // VibeNote's own commands (/model, /usage…) run here; anything else goes to Claude Code as typed.
+      const shown = text;
+      input.value = '';
+      autosize();
+      log.querySelector('.agent-empty')?.remove();
+      log.append(el('div', 'msg user slash', shown));
+      scroll(true);
+      if (await slash.run(text)) return;
+      log.lastElementChild?.classList.contains('slash') && log.lastElementChild.remove();
+    }
     await beforeSend();
     const c = getContext();
     addUser(label || text);
@@ -563,6 +580,8 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
   api.agent.onEvent(({ key, evt }) => {
     if (!ctx || key !== ctx.key) return;
     switch (evt.kind) {
+      case 'init': if (!$('.agent-model').textContent || $('.agent-model').textContent === 'Default') { const b = $('.agent-model'); b.title = `Model: ${evt.model} (Claude Code’s default) — click to change`; } break;
+      case 'rate_limit': log.append(el('div', 'agent-error', evt.info.status === 'rejected' ? `You’ve hit a plan limit${evt.info.resetsAt ? ` — it resets ${new Date(evt.info.resetsAt * 1000).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}. Type /usage for details.` : `Heads-up: ${Math.round((evt.info.utilization || 0) * (evt.info.utilization <= 1 ? 100 : 1))}% of a plan limit used. Type /usage for details.`)); scroll(true); break;
       case 'delta': delta(evt.text); break;
       case 'text': addText(evt.text); break;
       case 'thinking_start': startThinking(); break;
@@ -599,10 +618,33 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     }
   });
 
+  const slash = createSlash({
+    api,
+    input,
+    menuHost: $('.agent-foot'),
+    getNotebook: () => getContext().notebook,
+    addCard: (node) => { log.append(node); scroll(true); },
+    actions: {
+      submit: (t) => send(t),
+      newChat: async () => { await api.agent.newChat(ctx.key); await load(); },
+      openChats: () => openChats?.(),
+      setMode: (m) => setMode(m),
+      modelChanged: (v) => showModel(v),
+    },
+  });
+  function showModel(id) {
+    const b = $('.agent-model');
+    b.textContent = prettyModel(id);
+    b.title = `Model: ${id || 'Claude Code’s default'} — click to change (/model)`;
+  }
+  $('.agent-model').addEventListener('click', () => { slash.run('/model'); });
+
   input.addEventListener('keydown', (e) => {
+    if (slash.onKey(e)) return;
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(input.value); }
   });
-  input.addEventListener('input', () => { autosize(); if (ctx?.busy) $('.agent-send').hidden = !input.value.trim(); });
+  input.addEventListener('input', () => { autosize(); slash.onInput(); if (ctx?.busy) $('.agent-send').hidden = !input.value.trim(); });
+  input.addEventListener('blur', () => setTimeout(() => slash.close(), 150));
   $('.agent-send').addEventListener('click', () => send(input.value));
   $('.agent-stop').addEventListener('click', () => ctx && api.agent.stop(ctx.key));
   $('.agent-mode').addEventListener('change', (e) => setMode(e.target.value));

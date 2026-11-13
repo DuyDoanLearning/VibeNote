@@ -87,6 +87,7 @@ The notes folder is self-contained, so it can be synced between Macs (iCloud Dri
 | `src/theme.js` | Maps a VS Code theme to VibeNote's CSS variables |
 | `src/search.js` | Search filters and fuzzy matching |
 | `src/agent-panel.js` | The Claude chat panel (messages, tool activity, Allow/Deny cards, questions, plans) |
+| `src/agent-slash.js` | Slash commands in the Claude panel (/model, /effort, /usage, /context, /mcp… + Claude Code's own commands and skills) |
 | `src/chats-ui.js` | Claude Chats window: browse past chats, continue one in the panel (as a copy), save as a note |
 | `src-main/agent.js` | Agent host: Claude Agent SDK driving the installed Claude Code (bundled to `dist/agent.mjs`) |
 | `styles.css` / `markdown.css` | App styles / preview + export styles |

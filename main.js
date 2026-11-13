@@ -82,6 +82,7 @@ const DEFAULT_SETTINGS = {
   linkTitles: true,
   scrollSync: true,
   agentModel: '',          // '' = Claude Code's default
+  agentEffort: '',         // '' = default; low | medium | high | xhigh | max (set with /effort in the Claude panel)
   agentMode: 'default',    // default | acceptEdits | plan
   agentClaudePath: '',     // '' = find the installed `claude` automatically
 };
@@ -938,6 +939,7 @@ async function ensureChat(wc, key, project) {
     additionalDirectories: project.repo ? [rootDir()] : [],
     appendSystemPrompt: systemPromptFor(project),
     model: config.settings.agentModel,
+    effort: config.settings.agentEffort || undefined,
     permissionMode: config.settings.agentMode,
     resume: state.sessionId,
     claudePath,
@@ -1038,6 +1040,31 @@ ipcMain.handle('agent:send', async (e, { notebook, text, notePath, noteTitle }) 
 });
 
 ipcMain.handle('agent:stop', async (_e, key) => { await chats.get(key)?.chat.interrupt(); });
+
+// Slash commands in the panel: these start the project's Claude Code process if needed (no message is sent).
+const liveChat = async (e, notebook) => {
+  const project = projectFor(notebook);
+  return (await ensureChat(e.sender, project.key, project)).chat;
+};
+ipcMain.handle('agent:commands', async (e, nb) => (await liveChat(e, nb)).commands());
+ipcMain.handle('agent:models', async (e, nb) => ({ models: await (await liveChat(e, nb)).models(), current: config.settings.agentModel || '' }));
+ipcMain.handle('agent:set-model', async (e, nb, value) => {
+  const v = value === 'default' ? '' : String(value || '');
+  await (await liveChat(e, nb)).setModel(v);
+  config.settings.agentModel = v;
+  saveConfig();
+  return v;
+});
+ipcMain.handle('agent:set-effort', async (e, nb, level) => {
+  const v = level === 'default' ? '' : String(level || '');
+  await (await liveChat(e, nb)).setEffort(v);
+  config.settings.agentEffort = v;
+  saveConfig();
+  return v;
+});
+ipcMain.handle('agent:usage', async (e, nb) => (await liveChat(e, nb)).usage());
+ipcMain.handle('agent:context-usage', async (e, nb) => (await liveChat(e, nb)).contextUsage());
+ipcMain.handle('agent:mcp', async (e, nb) => (await liveChat(e, nb)).mcpStatus());
 ipcMain.handle('agent:mode', async (_e, key, mode) => {
   config.settings.agentMode = mode;
   saveConfig();
