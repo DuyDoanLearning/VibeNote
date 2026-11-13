@@ -552,3 +552,19 @@ body.no-sidebar #sidebar > .resizer, body.focus #sidebar > .resizer, body.focus 
 body.single #sidebar > .resizer, body.single #list > .resizer { display: none; }
 body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
 body.resizing #app { transition: none; }
+
+/* ---------- /claude writer (src/writer.js) ---------- */
+.cw { position: fixed; z-index: 45; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 34px rgba(20, 10, 60, .22), 0 2px 6px rgba(0,0,0,.08); padding: 8px; }
+.cw[hidden] { display: none; }
+.cw-row { display: flex; align-items: flex-start; gap: 8px; }
+.cw-spark { color: var(--accent); font-size: 16px; line-height: 30px; padding-left: 4px; }
+.cw.busy .cw-spark { animation: blink 1s steps(1) infinite; }
+.cw-input { flex: 1; min-width: 0; resize: none; border: 0; outline: none; background: none; color: var(--text); font: inherit; font-size: 14px; line-height: 1.5; padding: 5px 0; max-height: 140px; }
+.cw-go { padding: 5px 12px; font-size: 12.5px; }
+.cw-status { font-size: 12px; color: var(--accent); padding: 2px 6px 4px 30px; }
+.cw-status:empty { display: none; }
+.cw-out { margin: 6px 0 0; padding: 12px 14px; max-height: min(48vh, 520px); overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font-size: 14px; user-select: text; }
+.cw-out > :last-child { margin-bottom: 0; }
+.cw-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.cw-actions .btn { font-size: 12.5px; padding: 4px 11px; white-space: nowrap; flex: none; }
+.cw-hint { margin-right: auto; min-width: 0; font-size: 11.5px; color: var(--faint); padding-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

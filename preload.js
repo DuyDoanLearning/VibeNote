@@ -60,6 +60,11 @@ contextBridge.exposeInMainWorld('vibe', {
     ask: invoke('comments:ask'),
     postToConfluence: invoke('confluence:comment'),
   },
+  write: {
+    start: invoke('write:start'),
+    stop: invoke('write:stop'),
+    onDelta: (cb) => ipcRenderer.on('write:delta', (_e, d) => cb(d)),
+  },
   flushed: () => ipcRenderer.send('app:flushed'),
   onChanged: (cb) => ipcRenderer.on('vault:changed', () => cb()),
   onCommand: (cb) => ipcRenderer.on('command', (_e, cmd) => cb(cmd)),

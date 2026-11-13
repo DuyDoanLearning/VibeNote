@@ -26,6 +26,11 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - Edit the note, then click **Push** to send your changes back. Only the parts you changed are updated; diagrams, macros and images (the 🔒 boxes) stay as they are.
 - If someone changed the page in Confluence meanwhile, Push stops. Use **Pull Latest from Confluence** (⌘K) to refresh.
 
+## Ask Claude to write
+
+- Type **/claude** on a new line (or press **⇧⌘J**) and ask for something: a table, a checklist, a summary, a diagram… Claude's Markdown appears as it's written; click **Insert** to add it.
+- Select text first and press **⇧⌘J** to have Claude rewrite it (**Replace**). Type a new request in the box to adjust the result.
+
 ## Comments
 
 - Select text and click **💬** (or **⌥⌘M**) to comment on it; **⇧⌘M** shows all comments.

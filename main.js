@@ -949,6 +949,42 @@ ipcMain.handle('comments:ask', async (_e, { title, note, quote, thread }) => {
   return { reply, suggestion: sug != null && sug !== quote ? sug : null };
 });
 
+// ---------- /claude: Claude writes Markdown at the cursor ----------
+const WRITE_SYSTEM = `You write Markdown that will be inserted into a note in VibeNote (a Markdown notes app), at the user's cursor.
+Output ONLY the Markdown to insert: no preamble, no explanation, no closing remarks, and do not wrap it in a \`\`\`markdown fence.
+Match the note's language and style. Don't repeat the text around the cursor.
+VibeNote supports GitHub-flavored Markdown (tables, task lists "- [ ]"), callouts ("> [!NOTE]", TIP, IMPORTANT, WARNING, CAUTION), math ($…$ and $$…$$), \`\`\`mermaid diagrams, ==highlight==, footnotes and [[Note title]] links.
+Never create or change \`\`\`confluence blocks.
+If selected text is given, output the replacement for the selected text.
+If a previous draft is given, revise that draft according to the new request.`;
+const writes = new Map(); // id → AbortController
+
+ipcMain.handle('write:start', async (e, id, { title, before, after, selection, request, draft }) => {
+  const mod = await loadAgent();
+  const env = await mod.loginShellEnv();
+  const claudePath = mod.findClaude(env, config.settings.agentClaudePath);
+  if (!claudePath) throw new Error('Claude Code was not found. Install it and run `claude` once to log in, or set its path in Settings.');
+  const ac = new AbortController();
+  writes.set(id, ac);
+  const parts = [
+    `Note title: ${title}`,
+    `<before_cursor>\n${String(before).slice(-6000)}\n</before_cursor>`,
+    `<after_cursor>\n${String(after).slice(0, 2000)}\n</after_cursor>`,
+    selection ? `<selected_text>\n${selection}\n</selected_text>` : '',
+    draft ? `<previous_draft>\n${draft}\n</previous_draft>` : '',
+    `<request>\n${request}\n</request>`,
+  ].filter(Boolean);
+  try {
+    return await mod.askOnce({
+      prompt: parts.join('\n\n'), system: WRITE_SYSTEM, claudePath, env, model: config.settings.agentModel, cwd: rootDir(), signal: ac.signal,
+      onDelta: (text) => { if (!e.sender.isDestroyed()) e.sender.send('write:delta', { id, text }); },
+    });
+  } finally {
+    writes.delete(id);
+  }
+});
+ipcMain.handle('write:stop', (_e, id) => { writes.get(id)?.abort(); });
+
 // Post a comment to Confluence: inline on the highlighted text when Confluence can find it, otherwise a page comment.
 ipcMain.handle('confluence:comment', async (_e, { site, id, text, quote, parentId }) => {
   const atl = await loadAtlassian();
@@ -1126,6 +1162,7 @@ function buildMenu() {
         item('Version History…', 'history', 'CmdOrCtrl+Alt+Y'),
         { type: 'separator' },
         item('Add Comment', 'add-comment', 'CmdOrCtrl+Alt+M'),
+        item('Ask Claude to Write…', 'claude-write', 'CmdOrCtrl+Shift+J'),
       ],
     },
     {

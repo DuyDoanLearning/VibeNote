@@ -8,6 +8,7 @@ import { createConfluenceUI, CONFLUENCE_ROOT } from './confluence-ui.js';
 import { confluenceInfo } from './confluence.js';
 import { createComments } from './comments.js';
 import { setupResizers } from './resize.js';
+import { createWriter } from './writer.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
 import { moveLineUp, moveLineDown, copyLineDown, deleteLine } from '@codemirror/commands';
 
@@ -1343,6 +1344,7 @@ const COMMANDS = [
   { id: 'sort-title', title: 'Sort by Title', run: () => setSort('title') },
   { id: 'settings', title: 'Settings', key: '⌘,', run: openSettings },
   { id: 'toggle-agent', title: 'Toggle Claude Panel', key: '⌘J', run: () => { comments.toggle(false); agentPanel.toggle(); } },
+  { id: 'claude-write', title: 'Ask Claude to Write… (/claude)', key: '⇧⌘J', when: needNote, run: () => writer.open() },
   { id: 'add-comment', title: 'Add Comment on Selection', key: '⌥⌘M', when: needNote, run: () => comments.addComment() },
   { id: 'toggle-comments', title: 'Toggle Comments', key: '⇧⌘M', run: () => comments.toggle() },
   { id: 'outline', title: 'Go to Heading', key: '⇧⌘O', when: () => !!S.current, run: () => openPalette('#') },
@@ -1519,6 +1521,8 @@ comments = createComments({
   api, S, $, el, esc, editor, toast, metaChanged, isTrashed,
   closeAgent: () => { if (document.body.classList.contains('agent-open')) agentPanel.toggle(false); },
 });
+
+const writer = createWriter({ api, S, $, el, editor, isTrashed, toast, isDark, dirOf });
 
 (async function start() {
   if (SINGLE) document.body.classList.add('single');

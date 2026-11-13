@@ -252,6 +252,7 @@ const SLASH = [
   ['Heading 1', 'Big section title', '# ¦'],
   ['Heading 2', 'Section title', '## ¦'],
   ['Heading 3', 'Subsection title', '### ¦'],
+  ['Claude', 'Ask Claude to write…', '@claude'],
   ['Bullet list', 'Simple list', '- ¦'],
   ['Numbered list', '1. 2. 3.', '1. ¦'],
   ['Task list', 'Checklist', '- [ ] ¦'],
@@ -280,6 +281,11 @@ function applyTemplate(view, from, to, tpl) {
   if (tpl === '@image') {
     view.dispatch({ changes: { from, to, insert: '' }, userEvent: 'input.complete' });
     window.dispatchEvent(new CustomEvent('vibe:insert-image'));
+    return;
+  }
+  if (tpl === '@claude') {
+    view.dispatch({ changes: { from, to, insert: '' }, selection: { anchor: from }, userEvent: 'input.complete' });
+    window.dispatchEvent(new CustomEvent('vibe:claude-write'));
     return;
   }
   let text = typeof tpl === 'function' ? tpl() : tpl;

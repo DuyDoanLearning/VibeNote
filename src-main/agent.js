@@ -204,7 +204,7 @@ export class AgentChat {
 
 // ---------- one-shot answer (comments) ----------
 // A single reply with no tools and no saved session: Claude only sees what we send. Used by @Claude in comments.
-export async function askOnce({ prompt, system, claudePath, env: baseEnv, model, cwd, signal }) {
+export async function askOnce({ prompt, system, claudePath, env: baseEnv, model, cwd, signal, onDelta }) {
   const env = { ...baseEnv, CLAUDE_AGENT_SDK_CLIENT_APP: 'vibenote/0.2' };
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
@@ -221,6 +221,7 @@ export async function askOnce({ prompt, system, claudePath, env: baseEnv, model,
       model: model || undefined,
       tools: [],
       maxTurns: 1,
+      includePartialMessages: !!onDelta,
       persistSession: false,
       settingSources: [],
       systemPrompt: system,
@@ -229,6 +230,7 @@ export async function askOnce({ prompt, system, claudePath, env: baseEnv, model,
     },
   });
   for await (const m of q) {
+    if (m.type === 'stream_event' && m.event?.type === 'content_block_delta' && m.event.delta?.type === 'text_delta') onDelta?.(m.event.delta.text);
     if (m.type === 'assistant') for (const b of m.message?.content || []) if (b.type === 'text') text += b.text;
     if (m.type === 'result' && m.is_error) throw new Error(m.result || m.subtype || 'Claude could not answer');
   }
