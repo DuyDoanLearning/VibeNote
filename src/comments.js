@@ -329,6 +329,12 @@ export function createComments(ctx) {
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(t, ta.value, false); }
         if (e.key === 'Escape' && draft === t.id && !ta.value.trim()) { e.preventDefault(); remove(t); }
       });
+      const label = () => {
+        const toClaude = asksClaude(ta.value);
+        sendBtn.textContent = toClaude ? '✦ Send to Claude' : 'Comment';
+        askBtn.hidden = toClaude;
+      };
+      ta.addEventListener('input', label);
       ta.addEventListener('focus', () => { if (active !== t.id) { active = t.id; applyMarks(); c.classList.add('active'); } });
       row.append(askBtn, sendBtn);
       box.append(ta, row);
@@ -377,11 +383,15 @@ export function createComments(ctx) {
   function selectionChanged() {
     const sel = editor.selection();
     if (sel.empty || !sel.focused || !S.current || isTrashed() || !sel.text.trim()) return hideFloat();
-    const end = editor.coordsAt(sel.to) || editor.coordsAt(sel.from);
+    // Sit just above the first selected line, so the pill never covers the selection itself;
+    // below the last line when the selection starts at the very top of the editor.
+    const start = editor.coordsAt(sel.from);
+    const end = editor.coordsAt(sel.to) || start;
     const box = $('#editor').getBoundingClientRect();
-    if (!end || end.bottom < box.top || end.top > box.bottom) return hideFloat();
-    floatBtn.style.top = `${Math.max(box.top + 4, end.top - 34)}px`;
-    floatBtn.style.left = `${Math.min(box.right - 44, end.right + 6)}px`;
+    if (!start || end.bottom < box.top || start.top > box.bottom) return hideFloat();
+    const above = start.top - 42 >= box.top + 2;
+    floatBtn.style.top = `${above ? start.top - 42 : end.bottom + 8}px`;
+    floatBtn.style.left = `${Math.max(box.left + 4, Math.min(box.right - 124, (above ? start.left : end.left) - 8))}px`;
     floatBtn.hidden = false;
   }
   floatBtn.addEventListener('mousedown', (e) => { e.preventDefault(); addComment(); });

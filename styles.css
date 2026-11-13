@@ -515,8 +515,16 @@ body.comments-open #agent { display: none; }
 .cm-ask { color: var(--accent); }
 .cm-foot { display: flex; gap: 14px; margin-top: 8px; }
 .cm-resolved summary { font-size: 12px; color: var(--muted); cursor: pointer; padding: 10px 2px 2px; }
-#comment-float { position: fixed; z-index: 40; width: 32px; height: 28px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); box-shadow: var(--shadow); font-size: 14px; cursor: pointer; padding: 0; }
-#comment-float:hover { background: var(--accent-soft); }
+#comment-float {
+  position: fixed; z-index: 40; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 34px; padding: 0 14px 0 11px; border-radius: 17px; border: 0; cursor: pointer;
+  background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; line-height: 1;
+  box-shadow: 0 4px 14px rgba(109, 74, 255, .35), 0 1px 3px rgba(0, 0, 0, .15);
+  animation: cm-pop .12s ease-out;
+}
+#comment-float svg { width: 17px; height: 17px; stroke: currentColor; fill: none; flex: none; display: block; }
+#comment-float:hover { filter: brightness(1.08); transform: translateY(-1px); }
+@keyframes cm-pop { from { opacity: 0; transform: translateY(4px) scale(.96); } }
 #comment-float[hidden] { display: none; }
 
 /* Narrow editor column (e.g. Comments or Claude panel open): let the toolbar shrink instead of spilling over. */
