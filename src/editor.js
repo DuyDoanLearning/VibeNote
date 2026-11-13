@@ -42,7 +42,7 @@ const commentField = StateField.define({
 });
 
 const v = (name) => `var(${name})`;
-const highlight = HighlightStyle.define([
+export const highlight = HighlightStyle.define([
   // Markdown
   { tag: t.heading1, fontSize: '1.4em', fontWeight: '700', color: v('--md-heading') },
   { tag: t.heading2, fontSize: '1.22em', fontWeight: '700', color: v('--md-heading') },
@@ -69,7 +69,7 @@ const highlight = HighlightStyle.define([
   { tag: t.invalid, color: '#ef4444' },
 ]);
 
-const theme = EditorView.theme({
+export const theme = EditorView.theme({
   '&': { height: '100%', backgroundColor: 'transparent', color: 'var(--text)' },
   '.cm-scroller': { fontFamily: 'var(--editor-font)', fontSize: 'var(--editor-size)', lineHeight: '1.6' },
   '.cm-content': { maxWidth: 'var(--line-width)', margin: '0', padding: '14px 24px 40vh', caretColor: 'var(--accent)' },

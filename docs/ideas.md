@@ -29,7 +29,7 @@ Ideas discussed with the owner (2026-11-13), not yet decided or built. Owner's t
 ## Projects workspace (spec: `docs/workspace-spec.md`)
 19. **Step 1 — Projects, home page, multi-repo workspace, several chats per project**: built on `agent`, 2026-11-13.
 20. **Step 2 — Draw.io editor** inside VibeNote: built on `agent`, 2026-11-14 (plus a model per chat).
-21. **Step 3 — Coding layout**: chat in the centre, diff review with comments on lines, read-only code viewer, "Open in VS Code".
+21. **Step 3 — Coding layout**, changes review with line comments for Claude, file viewer: built on `agent`, 2026-11-14.
 22. **Step 4 — Spec watch**: a followed Confluence page changes → what changed, and which code / API specs it affects.
 23. **Step 5 — Figma → API proposal**: frame beside the API spec editor, Claude drafts endpoints linked to the screen.
 24. **Start coding from a document** (owner's idea, 2026-11-13): a "Build this" button on a spec that opens a chat on the right repository with the document attached (plan → approve → code); possibly hand over to T3 Code instead.

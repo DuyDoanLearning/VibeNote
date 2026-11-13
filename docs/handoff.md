@@ -22,6 +22,11 @@ live test), several chats per project with a switcher in the Claude panel, proje
 real projects: expect feedback. The owner's real "VibeNote Dev" notebook shows up as a project automatically
 (it has a linked folder).
 
+**Step 3 (2026-11-14): coding layout, Changes review with line comments for Claude, file viewer**, and automatic
+recovery when Claude Code no longer has a chat's conversation. See `docs/workspace-spec.md` → Step 3 and CLAUDE.md →
+Code view. Tested in an isolated profile including one live Haiku round (comment on a diff line → Claude fixed it →
+the Changes view refreshed).
+
 **Step 2 (2026-11-14): draw.io diagrams** inside VibeNote, **a model / effort / mode per chat**, and earlier chats
 open directly from the home page. See `docs/workspace-spec.md` → Step 2 and CLAUDE.md → Diagrams. Tested in an
 isolated profile (open, save through the editor's message, outside change reloads, write guards, a real 67 KB

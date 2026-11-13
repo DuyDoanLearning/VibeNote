@@ -14,6 +14,7 @@ import { createChatsUI } from './chats-ui.js';
 import { createChangesUI } from './changes-ui.js';
 import { createProjectUI } from './project-ui.js';
 import { createDiagramUI } from './diagram-ui.js';
+import { createCodeUI } from './code-ui.js';
 import { diffLines } from 'diff';
 import { splitTarget, parseOperation, apiOperations, embeddedSpecs, mdHeadings, linksTo } from './links.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
@@ -119,6 +120,7 @@ function findByTitle(t) {
 }
 
 // ---------- editor ----------
+var codeUI = null; // code review: changes, file viewer, comments for Claude (created further down)
 var diagramUI = null; // draw.io diagrams: sidebar section + editor view (created further down)
 var projectUI = null; // projects: sidebar section + home page (created further down)
 let comments = null; // comments panel (created further down; the editor reports selections and clicks to it)
@@ -297,6 +299,7 @@ async function openNote(path) {
   if (path === S.current) return;
   await leaveCurrent();
   await diagramUI?.close(true);
+  codeUI?.close(true);
   const n = S.notes.find((x) => x.path === path);
   if (!n) return;
   if (!S.navigating && S.current) {
@@ -700,7 +703,7 @@ function renderAll() {
 let homeTimer = null;
 let homeAt = 0;
 function homeSoon() {
-  if (!S.home || S.current || S.diagram || !projectUI) return;
+  if (!S.home || S.current || S.diagram || S.code || !projectUI) return;
   clearTimeout(homeTimer);
   homeTimer = setTimeout(() => { homeAt = Date.now(); if (S.home && !S.current) projectUI.renderHome(); }, Math.max(300, 4000 - (Date.now() - homeAt)));
 }
@@ -1078,7 +1081,7 @@ function renderToolbar() {
   const n = currentNote();
   document.body.classList.toggle('no-note', !n);
   document.body.classList.toggle('project-home', !n && !!S.home);
-  const chipFor = n && !n.trashed ? projectUI?.projectOf(n) : S.diagram ? projectUI?.projectOfPath(S.diagram) : null;
+  const chipFor = n && !n.trashed ? projectUI?.projectOf(n) : S.diagram ? projectUI?.projectOfPath(S.diagram) : S.code ? S.project : null;
   const pchip = $('#project-chip');
   pchip.hidden = !chipFor;
   if (chipFor) { pchip.lastElementChild.textContent = chipFor; pchip.title = `Part of the project “${chipFor}” — open its home page`; pchip.dataset.project = chipFor; }
@@ -1725,6 +1728,8 @@ const COMMANDS = [
   { id: 'sections-expand', title: 'Expand All Note List Headings', when: () => !SINGLE && S.sections.length > 0, run: () => setSections(true) },
   { id: 'sections-collapse', title: 'Collapse All Note List Headings', when: () => !SINGLE && S.sections.length > 0, run: () => setSections(false) },
   { id: 'settings', title: 'Settings', key: '⌘,', run: openSettings },
+  { id: 'coding-layout', title: 'Toggle Coding Layout', key: '⇧⌘J', when: () => !SINGLE, run: () => toggleCoding() },
+  { id: 'review-changes', title: 'Review Code Changes', when: () => !SINGLE && !!S.project, run: () => codeUI.openChanges() },
   { id: 'new-diagram', title: 'New Diagram (draw.io)', when: () => !SINGLE, run: () => diagramUI.create(S.home || (S.filter.type === 'notebook' ? S.filter.name : '')) },
   { id: 'open-diagram', title: 'Open Diagram File…', when: () => !SINGLE, run: () => diagramUI.pick() },
   { id: 'new-project', title: 'New Project…', when: () => !SINGLE, run: () => projectUI.newProject() },
@@ -1910,6 +1915,7 @@ const agentPanel = createAgentPanel({
   api,
   getContext: () => {
     const n = currentNote();
+    if (S.code) return { notebook: S.project || '', notePath: S.code.tab === 'file' ? S.code.file : null, noteTitle: S.code.tab === 'file' && S.code.file ? `${S.code.file.split('/').pop()} (a code file, open in the viewer${S.code.line ? `, line ${S.code.line}` : ''})` : null };
     if (S.diagram) return { notebook: projectUI?.projectOfPath(S.diagram) || '', notePath: S.diagram, noteTitle: `${S.diagram.split('/').pop()} (a draw.io diagram, open in the editor)` };
     return {
       notebook: (n ? projectUI?.projectOf(n) || n.notebook : S.home || (S.filter.type === 'notebook' ? S.filter.name : '')),
@@ -1921,7 +1927,21 @@ const agentPanel = createAgentPanel({
   // Claude edits files directly; the folder watcher picks that up, this just makes it snappy.
   onNoteMaybeChanged: () => { clearTimeout(refreshSoon); refreshSoon = setTimeout(refresh, 150); },
   openChats: () => chatsUI.open(),
+  openFile: (mention) => codeUI.openMention(mention),
+  openChanges: () => codeUI.openChanges(),
+  toggleCoding: () => toggleCoding(),
 });
+
+// Coding layout: the chat takes the middle, the code (or the document) sits beside it.
+async function toggleCoding(force) {
+  const on = force ?? !document.body.classList.contains('coding');
+  if (!on) { document.body.classList.remove('coding'); editor.view.requestMeasure(); return; }
+  comments.toggle(false);
+  await agentPanel.toggle(true);
+  document.body.classList.add('coding');
+  if (!S.current && !S.diagram && !S.code && S.project && projectUI.find(S.project)?.repo) await codeUI.openChanges();
+  editor.view.requestMeasure();
+}
 
 // "Changes to push": Confluence pages edited here but not pushed yet.
 var changesUI = createChangesUI({
@@ -1955,7 +1975,16 @@ const chatsUI = createChatsUI({
   },
 });
 
+codeUI = createCodeUI({
+  api, S, $, el, toast, leaveCurrent, closeNote,
+  afterChange: () => { renderAll(); },
+  closeOthers: () => diagramUI.close(true),
+  getNotebook: () => S.project || '',
+  askClaude: async (text, label) => { comments.toggle(false); await agentPanel.toggle(true); agentPanel.ask(text, label); },
+});
+
 diagramUI = createDiagramUI({
+  beforeOpen: () => codeUI.close(true),
   api, S, $, el, toast, isDark, leaveCurrent, closeNote,
   afterChange: () => { renderAll(); agentPanel.noteChanged(); },
 });
@@ -1963,7 +1992,8 @@ diagramUI = createDiagramUI({
 projectUI = createProjectUI({
   openDiagram: (p) => diagramUI.open(p),
   newDiagram: (nb) => diagramUI.create(nb),
-  closeDiagram: () => diagramUI.close(true),
+  closeDiagram: () => { codeUI.close(true); return diagramUI.close(true); },
+  openCodeChanges: (repo) => codeUI.openChanges(repo),
   api, S, $, el, esc, overlay, closeOverlay, toast, live, inBook, kindOf, fmtDate, openNote, setFilter, leaveCurrent, closeNote, refresh, store, load, currentNote,
   reserved: [CONFLUENCE_ROOT, API_ROOT],
   agent: () => agentPanel,

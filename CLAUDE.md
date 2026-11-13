@@ -53,6 +53,13 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - Claude editing an open diagram was verified live (Edit on the .drawio file → Allow card → the editor reloads).
 - Embed protocol: `?embed=1&proto=json`; the frame posts `init` / `autosave` / `save`, VibeNote posts `load` / `status`. Test trick: `win.webContents.mainFrame.framesInSubtree` finds the frame; post a fake `autosave` from inside it.
 
+## Code view and coding layout (agent branch)
+- `src/code-ui.js`: a fourth main-area state (`S.code`, `body.code-open`) with two tabs, Changes (parsed `git diff`) and File (read-only CodeMirror). Line comments are kept in memory and sent to the open chat with `agentPanel.ask`. `code:*` IPC in main.js is read-only and guarded by `repoDir()` / `codeFile()`.
+- Main-area states are exclusive: note, project home (`S.home`), diagram (`S.diagram`), code (`S.code`). Opening one closes the others (`closeOthers` / `beforeOpen` / `closeDiagram` hooks in renderer.js). Check all four when adding a fifth.
+- Coding layout = `body.coding` (only with `agent-open`, not with `comments-open`): `#agent` moves to grid column 3 and `#main` to column 4 by explicit `grid-column` (`order` does not work: `#agent` has a fixed column).
+- `restartFresh()` in main.js: when resume fails with "No conversation found with session ID", the chat restarts with `transcriptOf(items)` as background. A test that deletes `~/.claude/projects/<folder>` will trigger it.
+- Name clash to avoid: `openChanges` in the projectUI context is the Confluence "Changes to push" window; the code review is `openCodeChanges`.
+
 ## Commands
 - `npm start` — build + run (dev)
 - `npm run build` — `build.mjs`: bundles `src/renderer.js` → `dist/renderer.js` and `src-main/agent.js` → `dist/agent.mjs`, copies KaTeX + Mermaid into `dist/`
@@ -76,7 +83,7 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - Details and today's lessons: `docs/handoff.md`.
 
 ## What's next
-- Projects workspace steps 3–5 in `docs/workspace-spec.md` (next: the coding layout).
+- Projects workspace steps 4–5 in `docs/workspace-spec.md` (next: spec watch), plus the owner's ideas there (context bridge to T3 Code / terminal, "Build this" button).
 - See `docs/handoff.md` → "Parked / next": Confluence sync & comments (parked), real end-to-end Publish test.
 - Agent phases 2–4 (`docs/agent-spec.md`): Plan/Build buttons and templates, automatic change-log/commit links, codebase map, explain-as-notes, diff viewer, other agents (Codex).
 - Backlog with the owner's top picks: `docs/ideas.md` (⭐ git sync for notes, ⭐ "why does this line exist?", ⭐ a branch per spec).

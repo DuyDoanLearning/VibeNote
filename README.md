@@ -24,6 +24,7 @@ Press **⌘J** to open a chat with Claude next to your notes. Link a notebook to
 Also on the `agent` branch:
 
 - **Projects** (experimental, `agent` branch): a project gathers documents (notes, Confluence pages, API specs), a code folder with one or many repositories, and several Claude chats; its home page shows what changed since you last looked
+- **Coding layout** (experimental, `agent` branch, ⇧⌘J): the chat in the middle with the code beside it; review uncommitted changes or a commit as a diff, comment on lines and send the comments to Claude; a read-only file viewer with Open in VS Code
 - **Diagrams** (experimental, `agent` branch): `.drawio` files open in the full draw.io editor inside the app, save as you draw, and refresh when Claude edits the file
 - **Live Claude panel**: thinking, each step with its result, diffs, to-dos, helper progress; **slash commands** (`/model`, `/effort`, `/usage`, `/context`, `/mcp`, … and all your Claude Code commands and skills); **Esc** stops Claude
 - **Claude Chats**: browse past Claude Code chats (Terminal, VS Code, apps, T3 Code) per project, continue one in the panel, or save it as a note
@@ -100,6 +101,7 @@ The notes folder is self-contained, so it can be synced between Macs (iCloud Dri
 | `src/markdown.js` | Markdown → HTML (marked + wiki links, math, highlight, footnotes, callouts, Mermaid) |
 | `src/theme.js` | Maps a VS Code theme to VibeNote's CSS variables |
 | `src/search.js` | Search filters and fuzzy matching |
+| `src/code-ui.js` | Code view: changes (git diff) with line comments for Claude, read-only file viewer |
 | `src/diagram-ui.js` | draw.io diagrams: sidebar section and the embedded editor (the draw.io web app is downloaded at build time into `dist/drawio`) |
 | `projects.js` / `src/project-ui.js` | Projects: repositories in a workspace folder, the brief's document list; sidebar section, home page, pickers |
 | `src/agent-panel.js` | The Claude chat panel (messages, tool activity, Allow/Deny cards, questions, plans) |

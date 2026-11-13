@@ -102,6 +102,7 @@ export function createDiagramUI(ctx) {
   async function open(path) {
     if (!(await api.diagrams.available())) return toast('The diagram editor isn’t part of this build (it is downloaded when the app is built).');
     await leaveCurrent();
+    ctx.beforeOpen?.();
     await saving;
     let data;
     try { data = await api.diagrams.read(path); } catch (e) { return toast(errText(e)); }

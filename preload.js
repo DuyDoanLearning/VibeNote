@@ -99,6 +99,15 @@ contextBridge.exposeInMainWorld('vibe', {
     reveal: invoke('diagrams:reveal'),
     onChanged: (cb) => ipcRenderer.on('diagram:changed', (_e, p) => cb(p)),
   },
+  code: {
+    repos: invoke('code:repos'),
+    log: invoke('code:log'),
+    diff: invoke('code:diff'),
+    read: invoke('code:read'),
+    resolve: invoke('code:resolve'),
+    openEditor: invoke('code:open-editor'),
+    reveal: invoke('code:reveal'),
+  },
   chats: {
     projects: invoke('chats:projects'),
     list: invoke('chats:list'),

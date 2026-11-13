@@ -37,7 +37,10 @@ const SPIN = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢
 const fmtTokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n || 0));
 const fmtSecs = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; };
 
-export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChanged, openChats, onThreads }) {
+// looks like a file path, optionally with a line: has a letter-led extension, no spaces
+const FILE_RE = /^(?:[\w@.~-]*\/)*[\w@.-]+\.[A-Za-z][A-Za-z0-9]{0,7}(?::\d+(?:[-:]\d+)?)?$/;
+
+export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChanged, openChats, onThreads, openFile, openChanges, toggleCoding }) {
   const root = document.getElementById('agent');
   root.innerHTML = `
     <div class="titlebar agent-head">
@@ -57,6 +60,9 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     <div class="agent-threads">
       <button class="thread-pick" title="Chats in this project — click to switch"><span class="thread-dot"></span><span class="thread-title">Chat</span><span class="thread-scope"></span><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
       <button class="thread-others" title="Other chats in this project" hidden></button>
+      <span class="spacer"></span>
+      <button class="icon thread-changes" title="Review what changed in the code (and comment on lines)"><svg viewBox="0 0 24 24"><path d="M8 4v10M3 9h10M4 19h8M17 5v14M14 16l3 3 3-3"/></svg></button>
+      <button class="icon thread-wide" title="Coding layout: chat in the middle, code or document beside it (⇧⌘J)"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg></button>
       <button class="icon thread-new" title="New chat in this project"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
     </div>
     <div class="agent-log"></div>
@@ -103,6 +109,13 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     const d = el('div', 'agent-md markdown');
     d.innerHTML = renderMarkdown(text);
     d.querySelectorAll('a[href]').forEach((a) => { if (!a.getAttribute('href').startsWith('#')) a.target = '_blank'; });
+    // `src/app.js:42` → opens that file (if it exists in the project)
+    d.querySelectorAll('code').forEach((c) => {
+      if (c.closest('pre') || !FILE_RE.test(c.textContent)) return;
+      c.classList.add('file-ref');
+      c.title = 'Open this file';
+      c.addEventListener('click', async () => { if (!(await openFile?.(c.textContent))) c.classList.remove('file-ref'); });
+    });
     return d;
   }
 
@@ -190,6 +203,12 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
       r.row.append(detail);
     }
     r.row.querySelector('.tool-text').textContent = Object.keys(r.input).length ? toolSummary(r.name, r.input) : `${TOOL_LABEL[r.name] || r.name}…`;
+    if (r.input.file_path && openFile && !r.row.querySelector('.tool-open')) {
+      const b = el('button', 'tool-open', '↗');
+      b.title = 'Open this file';
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openFile(String(r.input.file_path)); });
+      r.row.querySelector('summary').append(b);
+    }
     if (Object.keys(r.input).length) activity(doing(r.name, r.input));
     if (t.done) markTool(t.id, t.isError, t.result);
     scroll();
@@ -695,6 +714,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
       case 'task': if (evt.toolUseId) subProgress(evt.toolUseId, { steps: evt.steps, last: evt.lastTool, tokens: evt.tokens, status: evt.status }); break;
       case 'sub_tool': subProgress(evt.parent, { last: evt.input ? toolSummary(evt.name, evt.input) : evt.name }); break;
       case 'note': log.append(el('div', 'result-line', evt.text)); scroll(); break;
+      case 'restart': log.append(el('div', 'result-line', evt.text)); scroll(); setBusy(true); break;
       case 'tool_result': {
         markTool(evt.id, evt.isError, evt.text);
         activity('Thinking');
@@ -759,11 +779,14 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
   $('.thread-pick').addEventListener('click', () => threadMenu(false));
   $('.thread-others').addEventListener('click', () => threadMenu(true));
   $('.thread-new').addEventListener('click', () => newThread());
+  $('.thread-changes').addEventListener('click', () => openChanges?.());
+  $('.thread-wide').addEventListener('click', () => toggleCoding?.());
 
   let lastKey = null;
   function toggle(force) {
     const open = force ?? !document.body.classList.contains('agent-open');
     document.body.classList.toggle('agent-open', open);
+    if (!open) document.body.classList.remove('coding'); // the coding layout is built around the chat
     if (!open) return Promise.resolve();
     lastKey = getContext().notebook;
     return load().then(() => input.focus());

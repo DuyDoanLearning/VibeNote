@@ -54,9 +54,26 @@ Not done: rename / delete a diagram from inside VibeNote (use Finder), diagrams 
 version history for diagrams, keyboard-shortcut clashes between VibeNote's menu and the editor are untested with
 real keys.
 
+## Step 3 — built (agent branch, 2026-11-14)
+
+- **Coding layout** (⇧⌘J, or the columns button in the Claude panel): sidebar | chat (wide, in the middle) | the
+  code or document on the right. The note list is hidden while it is on; closing the panel leaves it.
+- **Changes** (the ± button in the panel, *Changes* next to a repository on the home page): what is not committed
+  yet in a repository (new files included), or any of its last 25 commits, as red/green diffs per file. Refreshes
+  when Claude finishes a turn.
+- **Comment on lines → Claude**: click a line (in a diff or in the file viewer), type a comment, *Add*; *Send n to
+  Claude* posts them as one review message to the open chat (⌘↵ adds and sends).
+- **File viewer**: read-only, syntax-highlighted; opened from a diff's *Open*, the ↗ on a chat step, or by clicking a
+  file name Claude mentions (`src/app.js:42`). *Open in VS Code* jumps to the same line.
+- All git access is read-only and limited to repositories inside a linked project folder (`code:*` IPC).
+- Also: a chat whose Claude Code conversation is gone (Claude Code deletes old ones) now restarts by itself with
+  the recent messages as background instead of failing.
+
+Not done: comments are not stored (they live until sent), no side-by-side diff, no staging/committing from the
+view (Claude or your git tool does that), "Open in VS Code" only (no other editors).
+
 ## Next steps (in the order agreed)
-3. **Coding layout**: chat in the centre with the doc or diff beside it; review Claude's changes as a diff and
-   comment on lines (same comment model as notes); read-only code viewer for `file:line` links; "Open in VS Code".
+
 4. **Spec watch**: when a followed Confluence page changes, show what changed and which code / API specs it
    affects.
 5. **Figma → API proposal**: paste a frame link, see the screen beside the API spec editor, Claude drafts the
@@ -67,6 +84,9 @@ real keys.
 - **Start coding from a document** (owner, 2026-11-13): a "Build this" button on a spec/note that opens a new chat
   focused on the right repository with the document attached: plan first, owner approves, then code. Could also
   hand the task to T3 Code if it offers a way to start a thread from outside (not checked yet).
+- **Share project context with T3 Code / a terminal `claude`** (2026-11-14): they get the code and each repo's
+  CLAUDE.md, but not the brief or the document list. Idea: write a local, git-ignored CLAUDE file in the workspace
+  folder that imports the brief and lists the document paths.
 - **Distill a chat** into a note (decisions + open questions, linked back to the chat).
 - **Trace chats**: read-only investigation across upstream/downstream repositories, saved as a note.
 - **Project memory** (owner, 2026-11-13): what Claude learns in a project's chats is kept and reused (see ideas #17).

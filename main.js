@@ -1038,6 +1038,12 @@ async function ensureChat(wc, key, project) {
       return historyForAI(file, { version, compare_to });
     },
     onEvent: (evt) => {
+      if (state.dead) return; // replaced by a fresh conversation (see restartFresh)
+      // Claude Code keeps conversations for a limited time. If this one is gone, carry on in a new one.
+      if (evt.kind === 'error' && /No conversation found with session ID/i.test(evt.message || '') && state.sessionId && state.lastSent && !state.retried) {
+        restartFresh(state, project).catch((e) => { record(state, { kind: 'error', message: e.message }); agentSend(state.wc, key, { kind: 'error', message: e.message }); });
+        return;
+      }
       record(state, evt);
       agentSend(state.wc, key, evt);
     },
@@ -1061,6 +1067,36 @@ async function ensureChat(wc, key, project) {
   });
   chats.set(key, state);
   return state;
+}
+
+// What was said in a chat (your messages and Claude's replies, newest kept), to hand to a new conversation.
+function transcriptOf(items, max = 20000) {
+  const msgs = (items || []).filter((i) => (i.kind === 'user' || i.kind === 'text') && i.text?.trim());
+  const out = [];
+  let size = 0;
+  for (let i = msgs.length - 1; i >= 0 && size < max; i--) {
+    let t = msgs[i].text.replace(/<vibenote-context>[\s\S]*?<\/vibenote-context>\s*/g, '').trim();
+    if (!t) continue;
+    if (t.length > 3000) t = t.slice(0, 3000) + ' …';
+    out.unshift(`${msgs[i].kind === 'user' ? 'User' : 'Claude'}: ${t}`);
+    size += t.length;
+  }
+  return out.join('\n\n');
+}
+async function restartFresh(old, project) {
+  const text = old.lastSent;
+  old.dead = true;
+  old.chat.close();
+  chats.delete(old.key);
+  const earlier = transcriptOf(old.items.slice(0, -1)); // everything before the message that just failed
+  const note = { kind: 'note', text: 'Claude Code no longer has this conversation stored, so it continues as a new one with the recent messages as background' };
+  const items = old.items.filter((i) => !(i.kind === 'result' && i === old.items[old.items.length - 1]));
+  writeChat(old.key, { sessionId: null, cwd: old.cwd, items: [...items, note] });
+  const fresh = await ensureChat(old.wc, old.key, project);
+  fresh.retried = true;
+  fresh.lastSent = text;
+  agentSend(old.wc, old.key, { kind: 'restart', text: note.text });
+  fresh.chat.send(`${earlier ? `<previous-conversation>\n${earlier}\n</previous-conversation>\n\nThe conversation above happened earlier in this chat; continue from it.\n\n` : ''}${text}`);
 }
 
 ipcMain.handle('agent:context', async (_e, notebook) => {
@@ -1120,7 +1156,8 @@ ipcMain.handle('agent:send', async (e, { notebook, text, notePath, noteTitle, la
   state.items.push({ kind: 'user', text });
   const background = state.background ? `${state.background}\n\nThe conversation above happened earlier (in another app); continue from it.\n\n` : '';
   state.background = undefined;
-  state.chat.send(background + context + text);
+  state.lastSent = background + context + text;
+  state.chat.send(state.lastSent);
   return { key: project.key };
 });
 
@@ -1378,6 +1415,95 @@ ipcMain.handle('diagrams:write', async (_e, p, xml) => {
 ipcMain.handle('diagrams:close', (e) => unwatchDiagram(e.sender.id));
 ipcMain.handle('diagrams:open-external', (_e, p) => shell.openPath(diagramFile(p)));
 ipcMain.handle('diagrams:reveal', (_e, p) => shell.showItemInFolder(diagramFile(p)));
+
+// ---------- code review: read-only views of a project's repositories (changes, commits, files) ----------
+const insideProjectFolder = (p) => Object.values(config.projects).some((root) => root && (p === path.resolve(root) || p.startsWith(path.resolve(root) + path.sep)));
+function repoDir(p) {
+  const dir = path.resolve(String(p || ''));
+  if (!insideProjectFolder(dir) || !fs.existsSync(path.join(dir, '.git'))) throw new Error('Not a repository of a linked project.');
+  return dir;
+}
+// A file Claude or the user may look at here: inside a linked code folder or the notes folder.
+function codeFile(p) {
+  const file = path.resolve(String(p || ''));
+  if (!insideProjectFolder(file) && !file.startsWith(rootDir() + path.sep)) throw new Error('That file is outside your project folders.');
+  return file;
+}
+const DIFF_FLAGS = ['--no-color', '--no-ext-diff', '--no-textconv', '-M', '--unified=3'];
+const looksBinary = (buf) => buf.subarray(0, 8000).includes(0);
+
+ipcMain.handle('code:repos', async (_e, notebook) => {
+  const project = projectFor(notebook);
+  const repos = await workspaceRepos(project.repo);
+  const st = chats.get(project.key) || readChat(project.key);
+  const focus = st.cwd || project.repo || null;
+  const out = await Promise.all(repos.map(async (r) => {
+    const s = await projects.git(r.path, ['status', '--porcelain']);
+    return { name: r.name, path: r.path, rel: r.rel, changed: s == null ? 0 : s.split('\n').filter(Boolean).length };
+  }));
+  // the repository the open chat is focused on comes first; otherwise one that has changes
+  const pick = out.find((r) => r.path === focus) || out.find((r) => r.changed) || out[0] || null;
+  return { project: project.name, repos: out, current: pick?.path || null };
+});
+ipcMain.handle('code:log', async (_e, repo) => {
+  const out = await projects.git(repoDir(repo), ['log', '-25', '--format=%h%x1f%s%x1f%ct%x1f%an']);
+  return (out || '').split('\n').filter(Boolean).map((l) => { const [hash, subject, at, author] = l.split('\x1f'); return { hash, subject, at: Number(at) * 1000, author }; });
+});
+// commit: a short/long hash, or empty for what is not committed yet (including new files).
+ipcMain.handle('code:diff', async (_e, repo, commit) => {
+  const dir = repoDir(repo);
+  const MAX = 24 * 1024 * 1024;
+  if (commit) {
+    if (!/^[0-9a-f]{4,40}$/i.test(String(commit))) throw new Error('Bad commit id.');
+    const diff = await projects.git(dir, ['show', String(commit), '--format=', ...DIFF_FLAGS], 15000, MAX);
+    if (diff == null) throw new Error('Could not read that commit.');
+    return { diff, untracked: [] };
+  }
+  let diff = await projects.git(dir, ['diff', 'HEAD', ...DIFF_FLAGS], 15000, MAX);
+  if (diff == null) diff = await projects.git(dir, ['diff', ...DIFF_FLAGS], 15000, MAX); // a repository with no commit yet
+  if (diff == null) throw new Error('Could not read the changes (is git installed?).');
+  const names = ((await projects.git(dir, ['ls-files', '--others', '--exclude-standard', '-z'])) || '').split('\0').filter(Boolean);
+  const untracked = [];
+  for (const rel of names.slice(0, 40)) {
+    try {
+      const f = path.join(dir, rel);
+      const st = await fsp.stat(f);
+      if (!st.isFile()) continue;
+      const buf = st.size <= 300000 ? await fsp.readFile(f) : null;
+      untracked.push({ path: rel, text: buf && !looksBinary(buf) ? buf.toString('utf8') : null, size: st.size });
+    } catch {}
+  }
+  return { diff, untracked, moreUntracked: Math.max(0, names.length - 40) };
+});
+ipcMain.handle('code:read', async (_e, p) => {
+  const file = codeFile(p);
+  const st = await fsp.stat(file);
+  if (!st.isFile()) throw new Error('Not a file.');
+  if (st.size > 1.5e6) throw new Error('This file is too big to show here. Open it in your editor.');
+  const buf = await fsp.readFile(file);
+  if (looksBinary(buf)) throw new Error('This is not a text file.');
+  return { path: file, text: buf.toString('utf8') };
+});
+// A path mentioned in a chat ("src/app.js:42") → the real file, looked for in the chat's folder and the project's repositories.
+ipcMain.handle('code:resolve', async (_e, notebook, rel) => {
+  const project = projectFor(notebook);
+  const st = chats.get(project.key) || readChat(project.key);
+  const name = String(rel || '').replace(/^\.\//, '');
+  if (!name) return null;
+  const bases = [st.cwd, project.repo, ...(await workspaceRepos(project.repo)).map((r) => r.path), rootDir()].filter(Boolean);
+  const tries = path.isAbsolute(name) ? [name] : bases.map((b) => path.join(b, name));
+  for (const t of tries) {
+    try { const f = codeFile(t); if (fs.statSync(f).isFile()) return f; } catch {}
+  }
+  return null;
+});
+ipcMain.handle('code:open-editor', (_e, p, line) => {
+  const file = codeFile(p);
+  // VS Code's link format; if VS Code isn't installed, fall back to whatever app opens this kind of file
+  if (fs.existsSync('/Applications/Visual Studio Code.app')) return shell.openExternal(`vscode://file${encodeURI(file)}${Number(line) > 0 ? `:${Number(line)}` : ''}`);
+  return shell.openPath(file);
+});
+ipcMain.handle('code:reveal', (_e, p) => shell.showItemInFolder(codeFile(p)));
 
 // ---------- projects (spec: docs/workspace-spec.md) ----------
 async function listProjectsInfo() {
@@ -2238,6 +2364,7 @@ function buildMenu() {
         item('Toggle Sidebar', 'toggle-sidebar', 'CmdOrCtrl+\\'),
         item('Focus Mode', 'focus-mode', 'CmdOrCtrl+Shift+Enter'),
         item('Claude Panel', 'toggle-agent', 'CmdOrCtrl+J'),
+        item('Coding Layout', 'coding-layout', 'CmdOrCtrl+Shift+J'),
         item('Comments', 'toggle-comments', 'CmdOrCtrl+Shift+M'),
         {
           label: 'Sort Notes By',

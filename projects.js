@@ -32,9 +32,9 @@ What is this project for? One or two sentences.
 `;
 
 // fsmonitor/hooks off: these are read-only status questions and must never run anything a repo configures.
-const git = (cwd, args, timeout = 5000) => new Promise((resolve) => {
+const git = (cwd, args, timeout = 5000, maxBuffer = 4 * 1024 * 1024) => new Promise((resolve) => {
   execFile('git', ['-C', cwd, '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...args],
-    { timeout, maxBuffer: 4 * 1024 * 1024 }, (err, out) => resolve(err ? null : String(out)));
+    { timeout, maxBuffer }, (err, out) => resolve(err ? null : String(out)));
 });
 
 // Git repositories in a workspace folder: the folder itself (if it is one) and repos nested up to maxDepth levels.
@@ -125,4 +125,4 @@ function setSources(extra, list) {
   return lines.join('\n').trim();
 }
 
-module.exports = { BRIEF, BRIEF_TEMPLATE, findRepos, findFiles, repoInfo, parseSources, setSources };
+module.exports = { BRIEF, BRIEF_TEMPLATE, git, findRepos, findFiles, repoInfo, parseSources, setSources };

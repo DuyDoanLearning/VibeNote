@@ -311,7 +311,9 @@ export function createProjectUI(ctx) {
         if (r.hasGuide) { const g = chip('CLAUDE.md'); g.title = 'This repository has its own guide for Claude' + (r.hasSkills ? ' and its own skills' : ''); line.append(g); }
         const chatBtn = small('Chat', (e) => { e.stopPropagation(); newChat(name, r.path); });
         chatBtn.title = `New chat focused on ${r.rel || r.name}`;
-        line.append(el('span', 'spacer'), chatBtn);
+        const revBtn = small(r.changed ? `Changes (${r.changed})` : 'Changes', (e) => { e.stopPropagation(); S.project = name; ctx.openCodeChanges?.(r.path); });
+        revBtn.title = 'Review what changed in this repository, and comment on lines for Claude';
+        line.append(el('span', 'spacer'), revBtn, chatBtn);
         li.append(line);
         if (r.last) li.append(el('div', 'ph-commit', `${r.last.subject}  ·  ${ago(r.last.at)}`));
         li.title = r.path;
