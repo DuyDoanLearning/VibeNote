@@ -312,6 +312,13 @@ export function slashComplete(ctx) {
   };
 }
 
+// API specs (YAML/JSON) get only /claude — no Markdown templates.
+export function slashClaudeOnly(ctx) {
+  const r = slashComplete(ctx);
+  if (r) r.options = r.options.filter((o) => o.label === 'Claude');
+  return r;
+}
+
 export function emojiComplete(ctx) {
   const m = ctx.matchBefore(/(?<![\w:]):[a-z0-9_+-]{2,}$/i);
   if (!m) return null;

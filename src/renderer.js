@@ -10,6 +10,7 @@ import { createComments } from './comments.js';
 import { setupResizers } from './resize.js';
 import { createWriter } from './writer.js';
 import { createApiDocs } from './apidocs.js';
+import { diffLines } from 'diff';
 import { splitTarget, parseOperation, apiOperations, embeddedSpecs, mdHeadings, linksTo } from './links.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
 import { moveLineUp, moveLineDown, copyLineDown, deleteLine } from '@codemirror/commands';
@@ -94,7 +95,6 @@ function startsWithTitle(body, title) {
 
 const API_ROOT = 'APIs'; // top-level notebook for API specs (own sidebar section)
 const kindOf = (n) => (n.kind === 'api' ? 'api' : confluenceInfo(n.meta) ? 'confluence' : 'note');
-const hasSpec = (n) => n.kind === 'api' || /```(?:ya?ml|json)[^\n]*\n[\s\S]{0,600}?^\s*["']?(?:openapi|swagger)["']?\s*:/m.test(n.body);
 // [[Title#frag]] → { note, frag }. A title may itself contain '#', so try the whole thing first.
 function findByTarget(target) {
   const whole = findByTitle(target);
@@ -149,7 +149,7 @@ const editor = createEditor({
   onCommentClick: (id) => comments?.commentClicked(id),
 });
 setLinkResolver((target) => { const { note } = findByTarget(target); return note ? kindOf(note) : null; });
-const apiDocs = createApiDocs({ api, container: $('#apidocs'), onJump: (line) => editor.gotoLine(line) });
+const apiDocs = createApiDocs({ api, container: $('#apidocs'), onJump: (line) => editor.gotoLine(line), isDark: () => isDark() });
 
 // ---------- saving ----------
 let saveTimer = null;
@@ -596,7 +596,7 @@ function visibleNotes() {
     else {
       if (n.trashed) return false;
       if (f.type === 'inbox' && n.notebook) return false;
-      if (f.type === 'api' && !hasSpec(n)) return false;
+      if (f.type === 'api' && n.kind !== 'api') return false;
       if (f.type === 'notebook' && !inBook(n, f.name)) return false;
       if (f.type === 'tag' && !n.meta.tags.includes(f.name)) return false;
       if (f.type === 'status' && n.meta.status !== f.name) return false;
@@ -749,7 +749,7 @@ function renderSidebar() {
   // API specs: every spec file + notes that contain one, and the "APIs" notebook.
   const apiBox = $('#apis');
   apiBox.textContent = '';
-  const specCount = notes.filter(hasSpec).length;
+  const specCount = notes.filter((n) => n.kind === 'api').length;
   if (specCount || S.notebooks.includes(API_ROOT)) {
     apiBox.append(sideRow({
       icon: ICON.api, label: 'All API specs', count: specCount,
@@ -845,7 +845,6 @@ function renderList() {
 
     const head = el('div', 'note-title');
     if (n.kind === 'api') head.append(el('span', 'api-badge', 'API'));
-    else if (S.filter.type === 'api' && hasSpec(n)) { const b = el('span', 'api-badge in-note', 'API'); b.title = 'A note that contains an API spec'; head.append(b); }
     if (n.meta.pinned && !n.trashed) head.append(iconEl(ICON.pin, 'pin-ico'));
     head.append(el('span', '', n.title || 'Untitled'));
     li.append(head);
@@ -1365,6 +1364,7 @@ async function openHistory() {
     <div class="modal history">
       <div class="hist-side"><h2>Version history</h2><ul></ul></div>
       <div class="hist-main">
+        <div class="hist-tabs seg"><button data-view="changes" class="active">Changes</button><button data-view="full">Full text</button></div>
         <article class="markdown hist-preview"></article>
         <div class="actions">
           <button class="btn" data-act="close">Close</button>
@@ -1381,17 +1381,51 @@ async function openHistory() {
     return;
   }
   let chosen = null;
+  let view = 'changes';
+  let index = 0;
+  const bodies = new Map();
+  const bodyOf = async (i) => (bodies.has(i) ? bodies.get(i) : bodies.set(i, (await api.historyRead(path, list[i].id)).body).get(i));
+  // What changed in version i compared with the version before it: added lines green, removed red.
+  const showChanges = async (i) => {
+    const prev = i + 1 < list.length ? await bodyOf(i + 1) : '';
+    const parts = diffLines(prev, await bodyOf(i));
+    article.classList.remove('markdown');
+    article.classList.add('hist-diff');
+    article.textContent = '';
+    if (!parts.some((p) => p.added || p.removed)) { article.append(el('div', 'hist-same', 'No text changes in this version.')); return; }
+    article.append(el('div', 'hist-diff-head', i + 1 < list.length ? `Compared with ${fullFmt.format(new Date(list[i + 1].ts))}` : 'First saved version'));
+    for (const p of parts) {
+      const lines = p.value.replace(/\n$/, '').split('\n');
+      if (!p.added && !p.removed) {
+        const keep = lines.length > 6 ? [...lines.slice(0, 2), `… ${lines.length - 4} unchanged lines …`, ...lines.slice(-2)] : lines;
+        keep.forEach((l, k) => article.append(el('div', lines.length > 6 && k === 2 ? 'dl gap' : 'dl', l || ' ')));
+      } else for (const l of lines) article.append(el('div', p.added ? 'dl add' : 'dl del', (p.added ? '+ ' : '− ') + l));
+    }
+  };
+  const showFull = async (i) => {
+    article.classList.add('markdown');
+    article.classList.remove('hist-diff');
+    article.innerHTML = renderMarkdown(await bodyOf(i));
+    await postProcess(article, { dir: dirOf(path), dark: isDark() });
+  };
   const select = async (i) => {
+    index = i;
     $$('li', ul).forEach((li, j) => li.classList.toggle('sel', i === j));
     chosen = await api.historyRead(path, list[i].id);
-    article.innerHTML = renderMarkdown(chosen.body);
-    await postProcess(article, { dir: dirOf(path), dark: isDark() });
+    bodies.set(i, chosen.body);
+    await (view === 'changes' ? showChanges(i) : showFull(i));
     restoreBtn.disabled = i === 0;
     restoreBtn.dataset.ts = list[i].ts;
   };
+  $$('.hist-tabs button', ov).forEach((b) => b.addEventListener('click', () => {
+    view = b.dataset.view;
+    $$('.hist-tabs button', ov).forEach((x) => x.classList.toggle('active', x === b));
+    select(index);
+  }));
   list.forEach((v, i) => {
     const li = el('li');
-    li.append(el('span', 'hist-date', fullFmt.format(new Date(v.ts))), el('span', 'hist-label', i === 0 ? 'Current version' : ''));
+    const who = el('span', `hist-who who-${(v.label || 'You').toLowerCase().replace(/[^a-z]+/g, '-')}`, v.label || 'You');
+    li.append(el('span', 'hist-date', fullFmt.format(new Date(v.ts))), el('span', 'hist-label', i === 0 ? 'Current version' : ''), who);
     li.addEventListener('click', () => select(i));
     ul.append(li);
   });
@@ -1648,9 +1682,21 @@ const writer = createWriter({ api, S, $, el, editor, isTrashed, toast, isDark, d
 window.addEventListener('vibe:api-docs', (e) => {
   const { text, focus } = typeof e.detail === 'string' ? { text: e.detail } : e.detail;
   const ov = overlay('modal-ov');
-  ov.innerHTML = '<div class="modal api-modal"><div class="api-modal-head"><h2>API docs</h2><span class="hint">From the code block in this note · Try it out works here too</span><div class="spacer"></div><button class="btn" data-act="close">Close</button></div><div class="api-modal-body"></div></div>';
+  ov.innerHTML = '<div class="modal api-modal"><div class="api-modal-head"><h2>API docs</h2><span class="hint">From the code block in this note · Try it out works here too</span><div class="spacer"></div><button class="btn" data-act="extract" title="Copy this spec into the APIs section as its own YAML page">Save as API spec</button><button class="btn" data-act="close">Close</button></div><div class="api-modal-body"></div></div>';
   $('[data-act=close]', ov).addEventListener('click', closeOverlay);
-  const docs = createApiDocs({ api, container: $('.api-modal-body', ov) });
+  $('[data-act=extract]', ov).addEventListener('click', async () => {
+    const title = /^\s{2}title:\s*["']?(.+?)["']?\s*$/m.exec(text)?.[1] || S.meta?.title || 'API spec';
+    try {
+      const p = await api.create(API_ROOT, title, 'api');
+      await api.save(p, { title: nameOf(p) }, text.endsWith('\n') ? text : text + '\n');
+      closeOverlay();
+      await refresh();
+      setFilter({ type: 'notebook', name: API_ROOT });
+      await openNote(p);
+      toast(`Saved as an API spec in ${API_ROOT}. It's a copy — the note keeps its own version.`);
+    } catch (err) { toast('Could not save: ' + err.message); }
+  });
+  const docs = createApiDocs({ api, container: $('.api-modal-body', ov), isDark: () => isDark() });
   docs.show('block:' + text.length + ':' + text.slice(0, 200), text).then(() => { if (focus) docs.focus(focus); });
 });
 

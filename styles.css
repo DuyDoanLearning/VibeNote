@@ -599,3 +599,31 @@ body.api-note #status-pick, body.api-note #tag-list, body.api-note #tag-input, b
 .bl-more { color: var(--faint); }
 .api-badge.in-note { background: none; color: #2f9e6e; border: 1px solid #49cc90; }
 .apidocs .opblock.vn-flash { box-shadow: 0 0 0 3px var(--accent); transition: box-shadow .3s; }
+
+/* ---------- version history: who + what changed ---------- */
+.hist-tabs { align-self: flex-start; margin-bottom: 10px; }
+.hist-who { align-self: flex-start; margin-top: 3px; font-size: 10.5px; font-weight: 600; border-radius: 4px; padding: 0 5px; background: var(--hover); color: var(--muted); }
+.hist-who.who-claude, .hist-who.who-before-claude-edit { background: var(--accent-soft); color: var(--accent); }
+.hist-who.who-confluence, .hist-who.who-before-confluence-update { background: #e9f2ff; color: #0055cc; }
+.hist-diff { font: 12.5px/1.55 var(--mono); padding: 12px 0 !important; }
+.hist-diff .dl { padding: 0 16px; white-space: pre-wrap; word-break: break-word; }
+.hist-diff .dl.add { background: rgba(34, 197, 94, .14); color: #15803d; }
+.hist-diff .dl.del { background: rgba(239, 68, 68, .12); color: #b91c1c; }
+.hist-diff .dl.gap { color: var(--faint); font-style: italic; }
+.hist-diff-head, .hist-same { padding: 0 16px 8px; color: var(--muted); font: 12px var(--sans); }
+
+/* ---------- API docs: Swagger | Reference toggle ---------- */
+.apidocs .api-viewbar { position: sticky; top: 0; z-index: 6; display: flex; justify-content: flex-end; padding: 8px 12px 0; pointer-events: none; height: 0; overflow: visible; }
+.apidocs .api-viewbar .seg { pointer-events: auto; box-shadow: 0 1px 4px rgba(0,0,0,.12); background: #eef0f3; }
+.apidocs .api-viewbar .seg button { color: #555; }
+.apidocs .api-viewbar .seg button.active { background: #fff; color: #111; }
+.apidocs.view-reference { background: var(--bg) !important; color: var(--text) !important; color-scheme: normal !important; }
+.api-modal-body.apidocs.view-reference { background: var(--bg); }
+.apidocs.view-reference .api-ui { min-height: 100%; }
+.apidocs .api-error { padding-right: 200px; } /* room for the Swagger | Reference toggle */
+
+/* Reference view: Scalar in a frame that fills the pane */
+.apidocs.view-reference { display: flex !important; flex-direction: column; overflow: hidden !important; }
+.apidocs.view-reference .api-ui { flex: 1; min-height: 0; }
+.apidocs .ref-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
+.api-modal-body.apidocs.view-reference { overflow: hidden; }

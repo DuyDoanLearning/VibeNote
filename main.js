@@ -281,6 +281,7 @@ async function moveNoteFile(file, destDir, base = baseOf(file)) {
   await fsp.mkdir(destDir, { recursive: true });
   const dest = uniquePath(destDir, base, undefined, path.extname(file).toLowerCase() || '.md');
   await fsp.rename(file, dest);
+  await histMoved(file, dest);
   const srcDir = path.dirname(file);
   if (!samePath(srcDir, destDir)) {
     const text = await fsp.readFile(dest, 'utf8');
@@ -313,11 +314,55 @@ async function readTrashIndex() {
 
 // ---------- history ----------
 const histRoot = () => path.join(app.getPath('userData'), 'history');
+// A note's history folder. Found by the note's place in the notes folder first — tools like Claude's Edit, git or
+// sync apps replace a file with a new copy (new inode), and the history must stay with the note — then by the file's
+// identity (inode), which follows VibeNote's own renames and moves. history/paths.json maps note path → folder.
+let histIndex = null;
+async function loadHistIndex() {
+  if (histIndex) return histIndex;
+  try { histIndex = JSON.parse(await fsp.readFile(path.join(histRoot(), 'paths.json'), 'utf8')); } catch { histIndex = {}; }
+  return histIndex;
+}
+let histIndexWrite = Promise.resolve();
+const saveHistIndex = () => (histIndexWrite = histIndexWrite.then(async () => {
+  await fsp.mkdir(histRoot(), { recursive: true });
+  await fsp.writeFile(path.join(histRoot(), 'paths.json'), JSON.stringify(histIndex));
+}).catch(() => {}));
+// Keep history attached when VibeNote renames/moves a note or a whole notebook (fromPath/toPath may be folders).
+async function histMoved(fromPath, toPath) {
+  const ix = await loadHistIndex();
+  const rel = (p) => path.relative(rootDir(), p).split(path.sep).join('/');
+  const from = rel(fromPath), to = rel(toPath);
+  let changed = false;
+  for (const [p, k] of Object.entries(ix)) {
+    if (p === from || p.startsWith(from + '/')) {
+      delete ix[p];
+      ix[to + p.slice(from.length)] = k;
+      changed = true;
+    }
+  }
+  if (changed) saveHistIndex();
+}
 async function histDir(file) {
   const st = await fsp.stat(file);
-  return path.join(histRoot(), `${st.dev}-${st.ino}`);
+  const rel = path.relative(rootDir(), file).split(path.sep).join('/');
+  const ix = await loadHistIndex();
+  const inodeKey = `${st.dev}-${st.ino}`;
+  let key = ix[rel];
+  if (!key || !fs.existsSync(path.join(histRoot(), key))) {
+    key = inodeKey; // new note, or renamed/moved inside VibeNote (same file identity)
+    for (const [p, k] of Object.entries(ix)) if (k === key && p !== rel) delete ix[p]; // the old name no longer owns it
+    ix[rel] = key;
+    saveHistIndex();
+  }
+  return path.join(histRoot(), key);
 }
-async function snapshot(file, force) {
+// Who made each version: 'You' (saves in VibeNote), 'Claude' / 'Before Claude edit' (Claude panel edits),
+// 'Confluence' (fetch / pull). Kept next to the versions in labels.json.
+async function readLabels(dir) {
+  try { return JSON.parse(await fsp.readFile(path.join(dir, 'labels.json'), 'utf8')); } catch { return {}; }
+}
+async function snapshot(file, force, label = 'You') {
   const text = await fsp.readFile(file, 'utf8');
   if (!text.trim()) return;
   const dir = await histDir(file);
@@ -328,8 +373,110 @@ async function snapshot(file, force) {
     if (!force && Date.now() - Number(last.slice(0, -3)) < 5 * 60e3) return;
     if ((await fsp.readFile(path.join(dir, last), 'utf8')) === text) return;
   }
-  await fsp.writeFile(path.join(dir, `${Date.now()}.md`), text);
-  for (const old of list.slice(0, Math.max(0, list.length + 1 - 100))) await fsp.unlink(path.join(dir, old)).catch(() => {});
+  const ts = Date.now();
+  await fsp.writeFile(path.join(dir, `${ts}.md`), text);
+  const removed = list.slice(0, Math.max(0, list.length + 1 - 100));
+  for (const old of removed) await fsp.unlink(path.join(dir, old)).catch(() => {});
+  const labels = await readLabels(dir);
+  labels[ts] = label;
+  for (const old of removed) delete labels[old.slice(0, -3)];
+  await fsp.writeFile(path.join(dir, 'labels.json'), JSON.stringify(labels));
+}
+
+// Line diff (LCS, with the unchanged start/end skipped) → unified-style text with a little context.
+function lineDiff(a, b, context = 2) {
+  const A = a.split('\n'), B = b.split('\n');
+  let head = 0;
+  while (head < A.length && head < B.length && A[head] === B[head]) head++;
+  let tail = 0;
+  while (tail < A.length - head && tail < B.length - head && A[A.length - 1 - tail] === B[B.length - 1 - tail]) tail++;
+  const a2 = A.slice(head, A.length - tail), b2 = B.slice(head, B.length - tail);
+  const ops = [];
+  if (a2.length * b2.length > 4e6) {
+    a2.forEach((l) => ops.push(['-', l]));
+    b2.forEach((l) => ops.push(['+', l]));
+  } else {
+    const dp = Array.from({ length: a2.length + 1 }, () => new Uint32Array(b2.length + 1));
+    for (let i = a2.length - 1; i >= 0; i--) for (let j = b2.length - 1; j >= 0; j--) dp[i][j] = a2[i] === b2[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    let i = 0, j = 0;
+    while (i < a2.length || j < b2.length) {
+      if (i < a2.length && j < b2.length && a2[i] === b2[j]) { ops.push([' ', a2[i]]); i++; j++; }
+      else if (j < b2.length && (i >= a2.length || dp[i][j + 1] >= dp[i + 1][j])) ops.push(['+', b2[j++]]);
+      else ops.push(['-', a2[i++]]);
+    }
+  }
+  const before = A.slice(Math.max(0, head - context), head).map((l) => ['  ', l]);
+  const after = A.slice(A.length - tail, A.length - tail + context).map((l) => ['  ', l]);
+  const lines = [...before, ...ops.map(([k, l]) => [k === ' ' ? '  ' : k + ' ', l]), ...after];
+  const added = ops.filter((o) => o[0] === '+').length, removed = ops.filter((o) => o[0] === '-').length;
+  // Collapse long unchanged stretches
+  const out = [];
+  let run = [];
+  const flush = (end) => {
+    if (run.length > context * 2 + 1) out.push(...run.slice(0, end ? 0 : context), [`  … ${run.length - context * (end ? 1 : 2)} unchanged lines …`, ''], ...run.slice(-context));
+    else out.push(...run);
+    run = [];
+  };
+  for (const l of lines) { if (l[0] === '  ') run.push(l); else { flush(!out.length); out.push(l); } }
+  flush(false);
+  return { added, removed, text: out.map(([k, l]) => (l === '' && k.startsWith('  …') ? k.trim() : k + l)).join('\n') };
+}
+
+async function versionsOf(file) {
+  const dir = await histDir(file);
+  const labels = await readLabels(dir);
+  const list = (await fsp.readdir(dir)).filter((f) => f.endsWith('.md')).sort().reverse();
+  return list.map((f) => ({ id: f, ts: Number(f.slice(0, -3)), label: labels[f.slice(0, -3)] || 'You', file: path.join(dir, f) }));
+}
+const when = (ts) => new Date(ts).toLocaleString('en-GB', { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+// Text for AI: the note's versions (newest first, who + when + size of change), or one version's diff.
+async function historyForAI(file, { version, compare_to: compareTo = 'previous', limit = 25 } = {}) {
+  const current = await fsp.readFile(file, 'utf8');
+  let versions = [];
+  try { versions = await versionsOf(file); } catch {}
+  if (!versions.length) return 'No saved versions yet for this note.';
+  const texts = new Map();
+  const read = async (v) => (texts.has(v.id) ? texts.get(v.id) : texts.set(v.id, await fsp.readFile(v.file, 'utf8')).get(v.id));
+  if (!version) {
+    const rows = [];
+    for (let i = 0; i < Math.min(limit, versions.length); i++) {
+      const v = versions[i];
+      const prev = versions[i + 1];
+      const d = prev ? lineDiff(await read(prev), await read(v)) : null;
+      rows.push(`- ${v.ts} · ${when(v.ts)} · ${v.label}${d ? ` · +${d.added} −${d.removed} lines` : ' · first saved version'}`);
+    }
+    const now = lineDiff(await read(versions[0]), current);
+    return [
+      `Versions of this note (newest first; id · time · who · change from the version before):`,
+      ...rows,
+      now.added || now.removed ? `Unsaved-to-history changes since the newest version: +${now.added} −${now.removed} lines.` : '',
+      `Call again with version=<id> to see what changed in that version (compare_to: "previous" or "current").`,
+    ].filter(Boolean).join('\n');
+  }
+  const i = versions.findIndex((v) => String(v.ts) === String(version).replace(/\.md$/, ''));
+  if (i < 0) return `No version ${version}. Ask without a version to list them.`;
+  const v = versions[i];
+  const base = compareTo === 'current' ? await read(v) : versions[i + 1] ? await read(versions[i + 1]) : '';
+  const target = compareTo === 'current' ? current : await read(v);
+  const d = lineDiff(base, target);
+  const what = compareTo === 'current' ? `from version ${v.ts} (${when(v.ts)}, ${v.label}) to the current text` : `in version ${v.ts} (${when(v.ts)}, ${v.label}) compared with the version before it`;
+  const body = d.text.length > 12000 ? d.text.slice(0, 12000) + '\n… (diff truncated)' : d.text;
+  return `Changes ${what}: +${d.added} −${d.removed} lines.\n(Lines starting with "+" were added, "-" removed.)\n\n${body}`;
+}
+
+// Short "what changed lately" summary for one-shot Claude prompts (comments, /claude).
+async function recentChanges(file) {
+  try {
+    const versions = await versionsOf(file);
+    if (!versions.length) return '';
+    const current = await fsp.readFile(file, 'utf8');
+    const base = versions.find((v) => Date.now() - v.ts > 6 * 3600e3) || versions[versions.length - 1];
+    const d = lineDiff(await fsp.readFile(base.file, 'utf8'), current);
+    if (!d.added && !d.removed) return '';
+    const who = [...new Set(versions.filter((v) => v.ts > base.ts).map((v) => v.label))].join(', ') || 'You';
+    return `Changes since ${when(base.ts)} (by ${who}): +${d.added} −${d.removed} lines\n${d.text.slice(0, 4000)}`;
+  } catch { return ''; }
 }
 
 // ---------- export ----------
@@ -409,6 +556,7 @@ ipcMain.handle('note:save', async (_e, p, meta, body, forceSnapshot) => {
   const desired = uniquePath(path.dirname(file), safeName(title), file, api ? path.extname(file).toLowerCase() : '.md');
   if (desired !== file) {
     await fsp.rename(file, desired);
+    await histMoved(file, desired);
     file = desired;
   }
   // API specs are written exactly as typed (no front matter).
@@ -542,9 +690,7 @@ ipcMain.handle('note:pick-images', async (e, p) => {
 
 ipcMain.handle('note:history', async (_e, p) => {
   try {
-    const dir = await histDir(inRoot(p));
-    const list = (await fsp.readdir(dir)).filter((f) => f.endsWith('.md')).sort().reverse();
-    return list.map((f) => ({ id: f, ts: Number(f.slice(0, -3)) }));
+    return (await versionsOf(inRoot(p))).map(({ id, ts, label }) => ({ id, ts, label }));
   } catch {
     return [];
   }
@@ -599,6 +745,7 @@ ipcMain.handle('notebook:rename', async (_e, rel, name) => {
   const to = notebookDir(newRel);
   if (fs.existsSync(to) && !samePath(from, to)) throw new Error(`A notebook named “${safeName(name)}” already exists`);
   await fsp.rename(from, to);
+  await histMoved(from, to);
   return newRel;
 });
 
@@ -725,6 +872,8 @@ function systemPromptFor(project) {
     'You are running inside VibeNote, the user\'s Markdown notes app, as their writing and coding assistant. The user reads your replies in a narrow chat panel: keep them short and plain-spoken.',
     `- The user's notes are plain Markdown files in ${root}. Notebooks are folders. A note's title is its file name (an optional "title:" in the YAML front matter overrides it). Front matter may also hold tags, status (active/onhold/completed/dropped) and pinned — keep it intact.`,
     '- You can read and edit notes directly with your file tools; the user sees your edits appear live in the editor.',
+    '- Every note has a version history (who changed it — You, Claude or Confluence — and when). Use the note_history tool (mcp__vibenote__note_history) to list a note\'s versions or see exactly what changed in one, e.g. when asked what changed recently or why something is different.',
+    '- API specs are OpenAPI YAML/JSON files in the notes folder; [[Title]] and [[Title#Heading]] / [[Spec#GET /path]] link notes, Confluence pages and specs.',
   ];
   if (project.repo) {
     const nb = path.join(root, project.key);
@@ -784,6 +933,27 @@ async function ensureChat(wc, key, project) {
     resume: state.sessionId,
     claudePath,
     env,
+    // Keep a version before and after Claude edits a note, labelled, so history shows who changed what.
+    onFileEdit: async (phase, filePath) => {
+      try {
+        const file = inRoot(path.resolve(project.repo || rootDir(), String(filePath || '')));
+        if (!isNoteFile(file) || !fs.existsSync(file)) return;
+        await snapshot(file, true, phase === 'before' ? 'Before Claude edit' : 'Claude');
+      } catch {}
+    },
+    noteHistory: async ({ note, version, compare_to }) => {
+      let file;
+      try { file = inRoot(path.isAbsolute(note) ? note : path.join(rootDir(), note)); } catch { return 'That path is outside the notes folder.'; }
+      if (!fs.existsSync(file)) {
+        // allow a note title instead of a path
+        const all = [];
+        await walk(rootDir(), '', [], all);
+        const hit = all.map(([f]) => f).find((f) => baseOf(f).toLowerCase() === String(note).toLowerCase().replace(/\.(md|ya?ml|json)$/, ''));
+        if (!hit) return `No note "${note}" in the notes folder.`;
+        file = hit;
+      }
+      return historyForAI(file, { version, compare_to });
+    },
     onEvent: (evt) => {
       record(state, evt);
       agentSend(state.wc, key, evt);
@@ -945,9 +1115,9 @@ ipcMain.handle('confluence:save', async (_e, { notebook, existing, meta, body, s
   let file;
   if (existing) {
     file = inRoot(existing);
-    await snapshot(file, true).catch(() => {});
+    await snapshot(file, true, 'Before Confluence update').catch(() => {});
     const desired = uniquePath(path.dirname(file), safeName(title), file);
-    if (desired !== file) { await fsp.rename(file, desired); file = desired; }
+    if (desired !== file) { await fsp.rename(file, desired); await histMoved(file, desired); file = desired; }
   } else {
     const dir = notebookDir(notebook);
     await fsp.mkdir(dir, { recursive: true });
@@ -959,6 +1129,7 @@ ipcMain.handle('confluence:save', async (_e, { notebook, existing, meta, body, s
     await fsp.writeFile(sc, JSON.stringify(sidecar));
   }
   await fsp.writeFile(file, serializeNote({ ...meta, title }, body, path.basename(file, '.md')), 'utf8');
+  await snapshot(file, true, 'Confluence').catch(() => {});
   return file;
 });
 
@@ -1004,7 +1175,7 @@ Answer in this format:
 <reply>your comment reply</reply>
 <suggestion>replacement for the highlighted text</suggestion>   (omit this tag entirely if no change is needed)`;
 
-ipcMain.handle('comments:ask', async (_e, { title, note, quote, thread }) => {
+ipcMain.handle('comments:ask', async (_e, { title, note, quote, thread, notePath }) => {
   const mod = await loadAgent();
   const env = await mod.loginShellEnv();
   const claudePath = mod.findClaude(env, config.settings.agentClaudePath);
@@ -1013,6 +1184,7 @@ ipcMain.handle('comments:ask', async (_e, { title, note, quote, thread }) => {
   const prompt = [
     `Note title: ${title}`,
     `<note>\n${clip(note, 60000)}\n</note>`,
+    await (async () => { try { const c = notePath && (await recentChanges(inRoot(notePath))); return c ? `<recent_changes>\n${c}\n</recent_changes>` : ''; } catch { return ''; } })(),
     `<highlighted>\n${clip(quote, 8000)}\n</highlighted>`,
     `<thread>\n${thread.map((m) => `${m.author === 'claude' ? 'Claude' : 'User'}: ${m.text}${m.suggestion ? `\n(Claude suggested replacing the highlight with: ${m.suggestion.text} — ${m.suggestion.status})` : ''}`).join('\n\n')}\n</thread>`,
     'Reply to the last message in the thread.',
@@ -1071,7 +1243,7 @@ Output ONLY the YAML to insert: no explanation and no \`\`\` fence. Indent it so
 If a previous draft is given, revise that draft according to the new request.`;
 const writes = new Map(); // id → AbortController
 
-ipcMain.handle('write:start', async (e, id, { title, before, after, selection, request, draft, kind }) => {
+ipcMain.handle('write:start', async (e, id, { title, before, after, selection, request, draft, kind, notePath }) => {
   const mod = await loadAgent();
   const env = await mod.loginShellEnv();
   const claudePath = mod.findClaude(env, config.settings.agentClaudePath);
@@ -1084,6 +1256,7 @@ ipcMain.handle('write:start', async (e, id, { title, before, after, selection, r
     `<after_cursor>\n${String(after).slice(0, 2000)}\n</after_cursor>`,
     selection ? `<selected_text>\n${selection}\n</selected_text>` : '',
     draft ? `<previous_draft>\n${draft}\n</previous_draft>` : '',
+    await (async () => { try { const c = notePath && (await recentChanges(inRoot(notePath))); return c ? `<recent_changes_to_this_note>\n${c}\n</recent_changes_to_this_note>` : ''; } catch { return ''; } })(),
     kind === 'api' ? `Indentation of the cursor line: ${JSON.stringify((/[^\n]*$/.exec(String(before))[0].match(/^\s*/) || [''])[0])}` : '',
     `<request>\n${request}\n</request>`,
   ].filter(Boolean);

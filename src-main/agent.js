@@ -2,7 +2,8 @@
 // and its existing login. Bundled by build.mjs into dist/agent.mjs and loaded by main.js.
 //
 // One AgentChat = one long-lived Claude Code session fed by a queue of user messages ("streaming input mode").
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query, createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -72,6 +73,7 @@ function createQueue() {
 export class AgentChat {
   /**
    * opts: { cwd, additionalDirectories, appendSystemPrompt, model, permissionMode, resume, claudePath, env,
+   *         onFileEdit(phase: 'before'|'after', filePath), noteHistory({ note, version, compare_to }) -> text,
    *         onEvent(evt), askPermission({ tool, input, title, reason, suggestions, signal }) -> PermissionResult }
    */
   constructor(opts) {
@@ -105,6 +107,33 @@ export class AgentChat {
           includePartialMessages: true,
           settingSources: ['user', 'project', 'local'],
           systemPrompt: { type: 'preset', preset: 'claude_code', append: o.appendSystemPrompt },
+          // VibeNote's own tools for Claude: read a note's version history (read-only, no permission prompt).
+          ...(o.noteHistory && {
+            mcpServers: {
+              vibenote: createSdkMcpServer({
+                name: 'vibenote',
+                version: '1.0.0',
+                tools: [tool(
+                  'note_history',
+                  'Version history of a note in the VibeNote notes folder: who changed it (You / Claude / Confluence) and when, and what changed. Without "version": lists versions (newest first) with change sizes. With "version" (an id from the list): the diff of that version against the one before it, or against the current text with compare_to="current".',
+                  {
+                    note: z.string().describe('Path of the note (absolute, or relative to the notes folder), or its title'),
+                    version: z.string().optional().describe('Version id from the list (a timestamp)'),
+                    compare_to: z.enum(['previous', 'current']).optional().describe('Compare the version with the one before it (default) or with the current text'),
+                  },
+                  async (args) => ({ content: [{ type: 'text', text: await o.noteHistory(args) }] }),
+                )],
+              }),
+            },
+            allowedTools: ['mcp__vibenote__note_history'],
+          }),
+          // Snapshot notes before/after Claude edits them (works in every permission mode).
+          ...(o.onFileEdit && {
+            hooks: {
+              PreToolUse: [{ matcher: 'Edit|Write|MultiEdit', hooks: [async (input) => { await o.onFileEdit('before', input.tool_input?.file_path); return { continue: true }; }] }],
+              PostToolUse: [{ matcher: 'Edit|Write|MultiEdit', hooks: [async (input) => { await o.onFileEdit('after', input.tool_input?.file_path); return { continue: true }; }] }],
+            },
+          }),
           abortController: this.controller,
           canUseTool: (tool, input, extra) => o.askPermission({
             tool, input, title: extra.title, reason: extra.decisionReason, suggestions: extra.suggestions, signal: extra.signal,

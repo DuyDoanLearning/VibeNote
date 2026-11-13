@@ -177,6 +177,7 @@ export function createComments(ctx) {
       const r = await api.comments.ask({
         title: S.meta?.title || '',
         note: editor.text(),
+        notePath: S.current,
         quote,
         thread: t.messages.map(({ author, text, suggestion }) => ({ author, text, suggestion })),
       });

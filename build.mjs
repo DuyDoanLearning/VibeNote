@@ -12,6 +12,10 @@ mkdirSync('dist/swagger', { recursive: true });
 cpSync('node_modules/swagger-ui-dist/swagger-ui-bundle.js', 'dist/swagger/swagger-ui-bundle.js');
 cpSync('node_modules/swagger-ui-dist/swagger-ui.css', 'dist/swagger/swagger-ui.css');
 cpSync('node_modules/swagger-ui-dist/LICENSE', 'dist/swagger/LICENSE');
+// Scalar API reference (MIT) — the "Reference" view for API specs.
+mkdirSync('dist/scalar', { recursive: true });
+cpSync('node_modules/@scalar/api-reference/dist/browser/standalone.js', 'dist/scalar/standalone.js');
+writeFileSync('dist/scalar/LICENSE.txt', 'Scalar API Reference (@scalar/api-reference): MIT License, https://github.com/scalar/scalar\n');
 
 await build({
   entryPoints: ['src/renderer.js'],

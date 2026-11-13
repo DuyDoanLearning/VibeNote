@@ -118,6 +118,7 @@ export function createWriter(ctx) {
     try {
       const final = await api.write.start(id, {
         title: S.meta?.title || '',
+        notePath: S.current,
         before: text.slice(0, at.from),
         after: text.slice(at.to),
         selection: at.selection,

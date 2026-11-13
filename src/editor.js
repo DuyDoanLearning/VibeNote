@@ -15,7 +15,7 @@ import { yaml } from '@codemirror/lang-yaml';
 import { json } from '@codemirror/lang-json';
 import { vim } from '@replit/codemirror-vim';
 import { tags as t } from '@lezer/highlight';
-import { typingKeymap, listMarkers, slashComplete, emojiComplete, fenceComplete } from './typing.js';
+import { typingKeymap, listMarkers, slashComplete, slashClaudeOnly, emojiComplete, fenceComplete } from './typing.js';
 
 // ---------- comment highlights ----------
 // Marks on commented text. They move with edits (mapped through every change), so a comment stays on its words.
@@ -102,7 +102,14 @@ const URL_RE = /^https?:\/\/[^\s<>"]+$/;
 export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClick, onPasteUrl, getTitles, getFragments = () => [], onSelection, onCommentClick }) {
   const comps = { vim: new Compartment(), gutter: new Compartment(), spell: new Compartment(), ro: new Compartment(), lang: new Compartment() };
   let lang = 'markdown'; // 'markdown' | 'yaml' | 'json' (API specs)
-  const langExt = () => (lang === 'yaml' ? yaml() : lang === 'json' ? json() : [markdown({ base: markdownLanguage, codeLanguages: languages }), listMarkers, EditorView.lineWrapping]);
+  // Markdown notes get the Markdown helpers; API specs (YAML/JSON) are plain code: no wrapping, no Markdown
+  // shortcuts or templates — only /claude.
+  const langExt = () => (lang === 'yaml' || lang === 'json'
+    ? [lang === 'yaml' ? yaml() : json(), autocompletion({ override: [slashClaudeOnly], icons: false })]
+    : [
+      markdown({ base: markdownLanguage, codeLanguages: languages }), listMarkers, EditorView.lineWrapping, typingKeymap,
+      autocompletion({ override: [wikiComplete, slashComplete, emojiComplete, fenceComplete], icons: false }),
+    ]);
   let settings = {};
   let readOnly = false;
   let silent = false;
@@ -171,11 +178,9 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
     syntaxHighlighting(highlight),
     bracketMatching(),
     closeBrackets(),
-    autocompletion({ override: [wikiComplete, slashComplete, emojiComplete, fenceComplete], icons: false }),
     rectangularSelection(),
     crosshairCursor(),
     highlightSelectionMatches(),
-    typingKeymap,
     keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
     comps.lang.of(langExt()),
     theme,

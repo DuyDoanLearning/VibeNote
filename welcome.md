@@ -34,9 +34,10 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 
 ## API specs (Swagger / OpenAPI)
 
-- **⌥⌘N** (or **+** next to **APIs** in the sidebar) creates an API spec (a `.yaml` file, marked **API** in the list). **All API specs** also lists notes and Confluence pages that contain one. Edit the YAML on the left; the Swagger docs update on the right. Mistakes show as “Line N: …” — click to jump there.
+- **⌥⌘N** (or **+** next to **APIs** in the sidebar) creates an API spec: a pure `.yaml` page, marked **API** in the list.
+- Switch the docs between **Swagger** and **Reference** (a modern three-column look with code samples in many languages) with the toggle at the top right. Both can send real requests. Edit the YAML on the left; the Swagger docs update on the right. Mistakes show as “Line N: …” — click to jump there.
 - **Try it out → Execute** calls the real API from VibeNote (no browser CORS errors). Tokens entered under **Authorize** are forgotten when VibeNote closes.
-- A ` ```yaml ` OpenAPI block inside any note (e.g. a Confluence page) gets an **⚡ API docs** button in the preview.
+- A ` ```yaml ` OpenAPI block inside any note (e.g. a Confluence page) gets an **⚡ API docs** button in the preview — and **Save as API spec** turns it into its own spec page.
 - **/claude** works in specs too: “add a POST /bookings endpoint with a 409 conflict response”.
 
 ## Comments
@@ -44,6 +45,11 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - Select text and click **💬** (or **⌥⌘M**) to comment on it; **⇧⌘M** shows all comments.
 - Type **@Claude** in a comment (or click **Ask Claude**) and Claude replies in the thread. If it suggests a change, you see before → after and choose **Accept** or **Reject**.
 - On Confluence pages, **Post to Confluence** puts a comment on the page for your team. Comments otherwise stay private, in a hidden `.comments` folder next to your notes.
+
+## History
+
+- **⌥⌘Y** opens Version History: every version shows **who** made it (You, Claude, Confluence) and **Changes** shows exactly what was added (green) and removed (red).
+- Claude can read the history too — ask it in the Claude panel "what changed in this note today?".
 
 ## Write
 
