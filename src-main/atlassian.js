@@ -11,7 +11,10 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 
-const SERVER_URL = 'https://mcp.atlassian.com/v1/mcp';
+// Two connections: 'main' (pages, comments — the tools VibeNote was built on) and 'files' (Atlassian's newer server,
+// used only to download page pictures: images and draw.io diagrams). Each has its own sign-in.
+const SERVERS = { main: 'https://mcp.atlassian.com/v1/mcp', files: 'https://mcp.atlassian.com/v2/mcp' };
+const keyOf = (server, k) => (server === 'main' ? k : `${server}.${k}`); // 'main' keeps the original key names
 // Fixed loopback port: the redirect URL is registered with Atlassian once, so it must not change between runs.
 const PORT = 47323;
 const REDIRECT_URL = `http://localhost:${PORT}/callback`;
@@ -38,9 +41,11 @@ const readKey = async (k) => { await writing.catch(() => {}); return (await read
 
 // ---------- OAuth provider (the SDK drives discovery, registration, PKCE and refresh) ----------
 class Provider {
-  constructor() {
+  constructor(server = 'main') {
     this.expectedState = null;
+    this.server = server;
   }
+  k(name) { return keyOf(this.server, name); }
   get redirectUrl() { return REDIRECT_URL; }
   get clientMetadata() {
     return {
@@ -52,17 +57,17 @@ class Provider {
     };
   }
   state() { return (this.expectedState = crypto.randomBytes(16).toString('hex')); }
-  clientInformation() { return readKey('client'); }
-  saveClientInformation(client) { return writeStore({ client }); }
-  tokens() { return readKey('tokens'); }
-  saveTokens(tokens) { return writeStore({ tokens }); }
-  codeVerifier() { return readKey('verifier'); }
-  saveCodeVerifier(verifier) { return writeStore({ verifier }); }
-  discoveryState() { return readKey('discovery'); }
-  saveDiscoveryState(discovery) { return writeStore({ discovery }); }
+  clientInformation() { return readKey(this.k('client')); }
+  saveClientInformation(client) { return writeStore({ [this.k('client')]: client }); }
+  tokens() { return readKey(this.k('tokens')); }
+  saveTokens(tokens) { return writeStore({ [this.k('tokens')]: tokens }); }
+  codeVerifier() { return readKey(this.k('verifier')); }
+  saveCodeVerifier(verifier) { return writeStore({ [this.k('verifier')]: verifier }); }
+  discoveryState() { return readKey(this.k('discovery')); }
+  saveDiscoveryState(discovery) { return writeStore({ [this.k('discovery')]: discovery }); }
   invalidateCredentials(scope) {
     const keys = scope === 'all' ? ['client', 'tokens', 'verifier', 'discovery'] : [scope];
-    return writeStore(Object.fromEntries(keys.map((k) => [k, undefined])));
+    return writeStore(Object.fromEntries(keys.map((k) => [this.k(k), undefined])));
   }
   redirectToAuthorization(url) {
     this.authUrl = url;
@@ -108,60 +113,74 @@ function waitForCallback(provider) {
 }
 
 // ---------- connection ----------
-let client = null;
+const clients = {}; // server → connected MCP client
 
 async function open(provider) {
   const c = new Client({ name: 'VibeNote', version: app.getVersion() });
-  const transport = new StreamableHTTPClientTransport(new URL(SERVER_URL), { authProvider: provider });
+  const transport = new StreamableHTTPClientTransport(new URL(SERVERS[provider.server]), { authProvider: provider });
   await c.connect(transport);
   return { c, transport };
 }
 
 /** Connect, signing in through the browser if needed (interactive) — resolves to the MCP client. */
-let connecting = null;
-export function connect({ interactive = true } = {}) {
-  if (client) return Promise.resolve(client);
-  return (connecting ||= doConnect(interactive).finally(() => { connecting = null; }));
+const connecting = {};
+let signingIn = Promise.resolve(); // one browser sign-in at a time (they share the callback port)
+export function connect({ interactive = true, server = 'main' } = {}) {
+  if (clients[server]) return Promise.resolve(clients[server]);
+  return (connecting[server] ||= doConnect(interactive, server).finally(() => { connecting[server] = null; }));
 }
-async function doConnect(interactive) {
-  const provider = new Provider();
+async function doConnect(interactive, server) {
+  const provider = new Provider(server);
   provider.interactive = interactive;
+  if (interactive) await signingIn.catch(() => {});
+  let release;
+  if (interactive) signingIn = new Promise((r) => { release = r; });
   // Listen before anything can open the browser; stopped again if no sign-in turns out to be needed.
   const callback = interactive ? waitForCallback(provider) : null;
   try {
-    client = (await open(provider)).c;
+    clients[server] = (await open(provider)).c;
   } catch (e) {
     if (!(e instanceof UnauthorizedError) || !interactive) throw e;
     const code = await callback.promise;
     // finishAuth exchanges the code for tokens (saved via the provider), then reconnect with them.
-    const transport = new StreamableHTTPClientTransport(new URL(SERVER_URL), { authProvider: provider });
+    const transport = new StreamableHTTPClientTransport(new URL(SERVERS[server]), { authProvider: provider });
     await transport.finishAuth(code);
-    client = (await open(provider)).c;
+    clients[server] = (await open(provider)).c;
   } finally {
     callback?.cancel();
+    release?.();
   }
-  return client;
+  return clients[server];
 }
 
-export async function isSignedIn() {
-  return !!(await readKey('tokens'));
+export async function isSignedIn(server = 'main') {
+  return !!(await readKey(keyOf(server, 'tokens')));
 }
 
 export async function signOut() {
-  try { await client?.close(); } catch {}
-  client = null;
+  for (const s of Object.keys(clients)) {
+    try { await clients[s]?.close(); } catch {}
+    delete clients[s];
+  }
   await writing.catch(() => {});
   try { fs.rmSync(storeFile()); } catch {}
 }
 
-export async function listTools() {
-  const c = await connect();
+export async function listTools(server = 'main') {
+  const c = await connect({ server });
   return (await c.listTools()).tools;
 }
 
+/** Run a read-only operation on the newer server (it exposes most operations through executeRead). */
+export async function read(name, cloudId, inputs, { interactive = false } = {}) {
+  await connect({ server: 'files', interactive });
+  const r = await call('executeRead', { name, cloudId, inputs }, 'files');
+  return r?.data ?? r;
+}
+
 /** Call an Atlassian MCP tool; returns parsed JSON when the tool answers with JSON text. */
-export async function call(name, args) {
-  const c = await connect();
+export async function call(name, args, server = 'main') {
+  const c = await connect({ server });
   // Big pages can take Atlassian over a minute (the SDK's default timeout).
   const res = await c.callTool({ name, arguments: args }, undefined, { timeout: 150_000 });
   const text = (res.content || []).filter((p) => p.type === 'text').map((p) => p.text).join('\n');

@@ -53,6 +53,8 @@ contextBridge.exposeInMainWorld('vibe', {
     save: invoke('confluence:save'),
     mkdir: invoke('confluence:mkdir'),
     push: invoke('confluence:push'),
+    pictures: invoke('confluence:pictures'),
+    openPicture: invoke('confluence:open-picture'),
   },
   comments: {
     read: invoke('comments:read'),

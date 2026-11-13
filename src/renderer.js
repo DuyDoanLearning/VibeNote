@@ -1129,6 +1129,7 @@ async function renderPreview(force = false) {
     onTask: isTrashed() ? null : (i) => editor.toggleTask(i),
     copyButtons: true,
   });
+  try { await confluence.decorate(tmp); } catch {}
   if (seq !== previewSeq) return;
   const box = $('#preview');
   const top = box.scrollTop;
@@ -1174,12 +1175,12 @@ function setSort(s) {
 }
 
 let toastTimer = null;
-function toast(msg) {
+function toast(msg, ms = 2600) {
   const t = $('#toast');
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
 
 function applySettings(s) {
@@ -1637,6 +1638,7 @@ const COMMANDS = [
   { id: 'confluence-push', title: 'Push to Confluence…', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.push() },
   { id: 'confluence-pull', title: 'Pull Latest from Confluence', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.pull() },
   { id: 'confluence-open', title: 'Open in Confluence', when: () => !!confluenceInfo(S.meta), run: () => confluence.openInConfluence() },
+  { id: 'confluence-pictures', title: 'Get Pictures from Confluence (images, draw.io)', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.downloadPictures() },
   { id: 'confluence-signout', title: 'Sign Out of Atlassian', run: () => confluence.signOut() },
   { id: 'mode-edit', title: 'View: Editor Only', key: '⌘1', run: () => setMode('edit') },
   { id: 'mode-split', title: 'View: Split', key: '⌘2', run: () => setMode('split') },
@@ -1815,6 +1817,7 @@ function bindUI() {
 const confluence = createConfluenceUI({
   api, S, $, el, esc, overlay, closeOverlay, toast, save, refresh, setFilter, openNote, currentNote,
   editorText: () => editor.text(),
+  rerender: () => renderPreview(),
   resolveLink: (target) => {
     const { note, frag } = findByTarget(target);
     const info = note && confluenceInfo(note.meta);

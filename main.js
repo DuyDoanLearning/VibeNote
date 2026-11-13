@@ -1126,7 +1126,9 @@ ipcMain.handle('confluence:save', async (_e, { notebook, existing, meta, body, s
   if (sidecar) {
     const sc = sidecarPath(sidecar.id);
     await fsp.mkdir(path.dirname(sc), { recursive: true });
-    await fsp.writeFile(sc, JSON.stringify(sidecar));
+    let old = {};
+    try { old = JSON.parse(await fsp.readFile(sc, 'utf8')); } catch {}
+    await fsp.writeFile(sc, JSON.stringify({ ...sidecar, pictures: old.pictures, fileIds: old.fileIds }));
   }
   await fsp.writeFile(file, serializeNote({ ...meta, title }, body, path.basename(file, '.md')), 'utf8');
   await snapshot(file, true, 'Confluence').catch(() => {});
@@ -1272,6 +1274,150 @@ ipcMain.handle('write:start', async (e, id, { title, before, after, selection, r
 ipcMain.handle('write:stop', (_e, id) => { writes.get(id)?.abort(); });
 
 // Post a comment to Confluence: inline on the highlighted text when Confluence can find it, otherwise a page comment.
+// ---------- Confluence pictures (images and draw.io diagrams) ----------
+// The page's own picture files are downloaded (through Atlassian's newer server, its own sign-in) into
+// <root>/.confluence/pictures/<pageId>/ and shown inside the 🔒 boxes. The note's text doesn't change, so Push is unaffected.
+const unescapeHtml = (s) => s.replace(/&(quot|amp|lt|gt|#39|#x27);/g, (_m, e) => ({ quot: '"', amp: '&', lt: '<', gt: '>', '#39': "'", '#x27': "'" })[e]);
+const attr = (tag, name) => { const m = new RegExp(`\\s${name}="([^"]*)"`).exec(tag); return m ? unescapeHtml(m[1]) : ''; };
+
+// What pictures a kept block shows: draw.io diagrams (by name) and images (by media file id).
+function pictureRefs(html, pageId) {
+  const refs = [];
+  for (const m of html.matchAll(/<[a-z]+\s[^>]*data-type="(?:inline-|bodied-)?extension"[^>]*>/g)) {
+    const tag = m[0];
+    if (!/drawio|gliffy/i.test(attr(tag, 'data-extension-key'))) continue;
+    let p = {};
+    try { p = JSON.parse(attr(tag, 'data-parameters') || '{}'); } catch {}
+    const name = p.guestParams?.diagramDisplayName || p.macroParams?.diagramName?.value || p.macroParams?.name?.value;
+    if (name) refs.push({ key: `diagram:${name}`, kind: 'diagram', name, contentId: String(p.guestParams?.pageId || pageId) });
+  }
+  for (const m of html.matchAll(/<[a-z]+\s[^>]*data-type="media"[^>]*>/g)) {
+    const tag = m[0];
+    const fileId = attr(tag, 'data-id');
+    if (!fileId || (attr(tag, 'data-media-type') && attr(tag, 'data-media-type') !== 'file')) continue;
+    const contentId = /contentId-(\d+)/.exec(attr(tag, 'data-collection'))?.[1] || String(pageId);
+    refs.push({ key: `media:${fileId}`, kind: 'media', fileId, alt: attr(tag, 'data-alt'), contentId });
+  }
+  return refs;
+}
+
+async function readSidecar(id) {
+  return JSON.parse(await fsp.readFile(sidecarPath(id), 'utf8'));
+}
+
+// n → [picture paths relative to the notes folder] for the boxes whose pictures are downloaded.
+function pictureMap(side) {
+  const map = {}, wanted = [];
+  for (const [n, html] of Object.entries(side.kept || {})) {
+    const refs = pictureRefs(html, side.id);
+    if (!refs.length) continue;
+    wanted.push(n);
+    const files = refs.map((r) => side.pictures?.[r.key]).filter((f) => f && fs.existsSync(path.join(rootDir(), f)));
+    if (files.length) map[n] = files;
+  }
+  return { map, wanted };
+}
+
+const picturesBusy = new Map(); // page id → running download
+async function downloadPictures(id, interactive) {
+  const side = await readSidecar(id);
+  const atl = await loadAtlassian();
+  if (!interactive && !(await atl.isSignedIn('files'))) return { signedIn: false };
+  const site = side.site;
+  const lists = new Map();
+  const attachmentsOf = (cid) => {
+    if (!lists.has(cid)) lists.set(cid, (async () => {
+      const all = [];
+      let cursor = null;
+      for (let i = 0; i < 10; i++) {
+        const r = await atl.read('listConfluenceAttachments', site, { contentId: cid, limit: 250, ...(cursor && { cursor }) }, { interactive });
+        all.push(...(r.results || []));
+        cursor = r.nextCursor || cursorOf(r);
+        if (!cursor) break;
+      }
+      return all;
+    })().catch(() => []));
+    return lists.get(cid);
+  };
+  side.fileIds ||= {}; // attachment id → media file id (only looked up when the name doesn't match)
+  const fileIdOf = async (att) => {
+    if (!side.fileIds[att.id]) {
+      try { side.fileIds[att.id] = (await atl.read('getConfluenceAttachment', site, { attachmentId: att.id })).fileId || '-'; } catch { return ''; }
+    }
+    return side.fileIds[att.id];
+  };
+  const find = async (ref) => {
+    const atts = (await attachmentsOf(ref.contentId)).filter((a) => a.status !== 'archived');
+    if (ref.kind === 'diagram') {
+      const names = [`${ref.name}.png`, `${ref.name}.drawio.png`].map((s) => s.toLowerCase());
+      return atts.find((a) => names.includes(String(a.title).toLowerCase()));
+    }
+    const byName = atts.filter((a) => a.title === ref.alt);
+    if (byName.length === 1) return byName[0];
+    for (const a of atts.filter((x) => /^image\//.test(x.mediaType || ''))) if ((await fileIdOf(a)) === ref.fileId) return a;
+    return null;
+  };
+
+  const dir = path.join(rootDir(), '.confluence', 'pictures', String(side.id));
+  await fsp.mkdir(dir, { recursive: true });
+  side.pictures = {};
+  const keep = new Set();
+  let got = 0, missing = 0;
+  const refs = Object.values(side.kept || {}).flatMap((html) => pictureRefs(html, side.id));
+  const unique = [...new Map(refs.map((r) => [r.key, r])).values()];
+  let i = 0;
+  const worker = async () => {
+    while (i < unique.length) {
+      const ref = unique[i++];
+      try {
+        const att = await find(ref);
+        if (!att) { missing++; continue; }
+        const ext = (path.extname(att.title || '') || '.png').toLowerCase().replace(/[^.a-z0-9]/g, '');
+        const name = `${String(att.id).replace(/\W/g, '')}-v${att.version?.number || 1}${ext}`;
+        const file = path.join(dir, name);
+        if (!fs.existsSync(file)) {
+          const d = await atl.read('downloadConfluenceAttachment', site, { attachmentId: att.id });
+          if (!d?.downloadUrl || !/^https:\/\//.test(d.downloadUrl)) throw new Error('no download link');
+          const res = await fetch(d.downloadUrl, { signal: AbortSignal.timeout(60_000) });
+          if (!res.ok) throw new Error(`download failed (${res.status})`);
+          const buf = Buffer.from(await res.arrayBuffer());
+          if (buf.length > 40 * 1024 * 1024) throw new Error('picture too big');
+          await fsp.writeFile(file + '.part', buf);
+          await fsp.rename(file + '.part', file);
+        }
+        keep.add(name);
+        side.pictures[ref.key] = path.relative(rootDir(), file).split(path.sep).join('/');
+        got++;
+      } catch (e) {
+        missing++;
+        console.warn('confluence picture', ref.key, e.message);
+      }
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  // Drop older versions of this page's pictures.
+  for (const f of await fsp.readdir(dir).catch(() => [])) if (!keep.has(f)) await fsp.rm(path.join(dir, f), { force: true }).catch(() => {});
+  await fsp.writeFile(sidecarPath(side.id), JSON.stringify(side));
+  return { signedIn: true, got, missing, ...pictureMap(side) };
+}
+
+// download=false: just say which boxes have pictures already. download=true: get them from Confluence
+// (interactive: may open the browser for the one-time sign-in).
+ipcMain.handle('confluence:pictures', async (_e, id, { download = false, interactive = false } = {}) => {
+  if (!download) {
+    try { return { ...pictureMap(await readSidecar(id)), signedIn: await (await loadAtlassian()).isSignedIn('files') }; } catch { return { map: {}, wanted: [] }; }
+  }
+  const key = String(id);
+  if (!picturesBusy.has(key)) picturesBusy.set(key, downloadPictures(key, interactive).finally(() => picturesBusy.delete(key)));
+  return picturesBusy.get(key);
+});
+
+ipcMain.handle('confluence:open-picture', async (_e, rel) => {
+  const full = inRoot(rel);
+  if (!full.startsWith(path.join(rootDir(), '.confluence', 'pictures') + path.sep)) throw new Error('Not a Confluence picture');
+  return shell.openPath(full);
+});
+
 ipcMain.handle('confluence:comment', async (_e, { site, id, text, quote, parentId }) => {
   const atl = await loadAtlassian();
   const body = text.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('');

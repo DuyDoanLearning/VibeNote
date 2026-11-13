@@ -91,3 +91,10 @@
 
 .markdown a.wikilink.kind-api::before { content: 'API'; font-size: .62em; font-weight: 800; letter-spacing: .03em; color: #fff; background: #49cc90; border-radius: 3px; padding: 0 3px; margin-right: 4px; vertical-align: .15em; }
 .markdown a.wikilink.kind-confluence::before { content: '☁ '; color: #0c66e4; }
+
+/* Confluence pictures (images, draw.io diagrams) shown inside their 🔒 box */
+.markdown .confluence-kept.has-picture { border-style: solid; padding: 8px; background: transparent; }
+.markdown .confluence-kept .ck-picture { display: block; max-width: 100%; height: auto; margin: 0 auto 6px; background: #fff; border-radius: 4px; cursor: zoom-in; }
+.markdown .confluence-kept.has-picture .ck-label { font-weight: 500; color: var(--muted); font-size: .9em; text-align: center; }
+.markdown .confluence-kept .ck-show { margin-top: 6px; font: inherit; font-size: .9em; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--accent); cursor: pointer; }
+.markdown .confluence-kept .ck-show:hover { border-color: var(--accent); }

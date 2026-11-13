@@ -9,7 +9,7 @@ const safeSeg = (t) => String(t).replace(/[\/\\:*?"<>|#\x00-\x1f]/g, '').replace
 const ICONS = { page: '📄', folder: '📁', whiteboard: '🧩', database: '🗃', embed: '🔗' };
 
 export function createConfluenceUI(ctx) {
-  const { api, S, $, el, esc, overlay, closeOverlay, toast, save, refresh, setFilter, openNote, currentNote, editorText, resolveLink } = ctx;
+  const { api, S, $, el, esc, overlay, closeOverlay, toast, save, refresh, setFilter, openNote, currentNote, editorText, resolveLink, rerender } = ctx;
   const cf = api.confluence;
 
   const pageUrl = (site, spaceKey, id, type = 'page') => {
@@ -175,6 +175,7 @@ export function createConfluenceUI(ctx) {
       if (result.skipped.length) parts.push(`${result.skipped.length} skipped because they have changes here that aren't in Confluence yet (${result.skipped.slice(0, 3).join(', ')}${result.skipped.length > 3 ? '…' : ''})`);
       if (result.failed.length) parts.push(`${result.failed.length} failed: ${result.failed[0]}`);
       toast(parts.join('. ') + '.');
+      picturesInBackground(result.ids);
     });
 
     if (input.value) load();
@@ -198,7 +199,7 @@ export function createConfluenceUI(ctx) {
       return it.id === data.root.id ? CONFLUENCE_ROOT : container(byId.get(it.parentId) || data.root);
     };
     const pages = chosen.filter((it) => it.type !== 'folder');
-    const out = { done: 0, skipped: [], failed: [], firstPath: null, rootNotebook: hasKids(data.root.id) ? container(data.root) : CONFLUENCE_ROOT };
+    const out = { done: 0, skipped: [], failed: [], firstPath: null, rootNotebook: hasKids(data.root.id) ? container(data.root) : CONFLUENCE_ROOT, ids: [] };
     for (const it of chosen.filter((x) => x.type === 'folder')) await cf.mkdir(container(it)).catch(() => {});
     let i = 0;
     for (const it of pages) {
@@ -210,6 +211,7 @@ export function createConfluenceUI(ctx) {
         if (it.type === 'page') {
           const args = { site, spaceKey, id: it.id, notebook: notebookFor(it), existing: existing?.path };
           p = await fetchPage(args).catch(() => fetchPage(args)); // one retry: Atlassian is sometimes slow
+          out.ids.push(it.id);
         } else {
           const url = pageUrl(site, spaceKey, it.id, it.type);
           p = await cf.save({
@@ -317,8 +319,74 @@ export function createConfluenceUI(ctx) {
       await refresh();
       if (path !== S.current) await openNote(path);
       toast('Updated from Confluence. Your previous text is in Version History.');
+      picturesInBackground([info.id]);
     } catch (e) {
       toast('Pull failed: ' + errText(e));
+    }
+  }
+
+  // ---------- pictures (images, draw.io diagrams) inside the 🔒 boxes ----------
+  const picCache = new Map(); // page id → { map: { n: [paths] }, wanted: [n], signedIn }
+  const PICTURE_BOX = /^(Image|draw\.io|Gliffy|Layout|Table)/i;
+
+  // Called on each preview render: put downloaded pictures into their boxes.
+  async function decorate(root) {
+    const info = confluenceInfo(S.meta);
+    if (!info || info.kind !== 'page') return;
+    const boxes = root.querySelectorAll('.confluence-kept[data-kept]');
+    if (!boxes.length) return;
+    if (!picCache.has(info.id)) picCache.set(info.id, await cf.pictures(info.id).catch(() => ({ map: {}, wanted: [] })));
+    const { map, wanted = [], signedIn } = picCache.get(info.id);
+    for (const box of boxes) {
+      const n = box.dataset.kept;
+      const files = map?.[n];
+      if (files?.length) {
+        box.classList.add('has-picture');
+        const label = box.querySelector('.ck-label');
+        for (const f of files) {
+          const img = document.createElement('img');
+          img.className = 'ck-picture';
+          img.src = 'file://' + encodeURI(`${S.root}/${f}`);
+          img.alt = label?.textContent || '';
+          img.title = 'Click to open full size';
+          img.addEventListener('click', () => cf.openPicture(f));
+          box.insertBefore(img, label);
+        }
+        box.querySelector('.ck-note')?.remove();
+      } else if (wanted.includes(n) && PICTURE_BOX.test(box.querySelector('.ck-label')?.textContent || '')) {
+        const b = document.createElement('button');
+        b.className = 'ck-show';
+        b.textContent = signedIn ? 'Show picture' : 'Show pictures from Confluence';
+        b.addEventListener('click', () => downloadPictures());
+        box.append(b);
+      }
+    }
+  }
+
+  async function downloadPictures(id = confluenceInfo(S.meta)?.id) {
+    if (!id) return;
+    const signedIn = (picCache.get(id) || await cf.pictures(id).catch(() => ({}))).signedIn;
+    toast(signedIn ? 'Getting pictures from Confluence…'
+      : 'Pictures need one more Atlassian sign-in. A browser tab opened — click Accept there, then come back.', 8000);
+    try {
+      const r = await cf.pictures(id, { download: true, interactive: true });
+      picCache.set(id, { ...r, signedIn: true });
+      rerender?.();
+      toast(r.got ? `Got ${r.got} picture${r.got === 1 ? '' : 's'}${r.missing ? ` (${r.missing} not found in Confluence)` : ''}.` : 'No pictures found for this page in Confluence.');
+    } catch (e) {
+      toast('Couldn’t get pictures: ' + errText(e));
+    }
+  }
+
+  // After fetching / pulling: refresh those pages' pictures quietly (only once pictures are signed in).
+  async function picturesInBackground(ids) {
+    for (const id of ids || []) {
+      try {
+        const r = await cf.pictures(id, { download: true, interactive: false });
+        if (r.signedIn === false) return;
+        picCache.set(id, { ...r, signedIn: true });
+        if (confluenceInfo(S.meta)?.id === id) rerender?.();
+      } catch {}
     }
   }
 
@@ -326,6 +394,8 @@ export function createConfluenceUI(ctx) {
     openFetch,
     push,
     pull,
+    decorate,
+    downloadPictures,
     info: () => confluenceInfo(S.meta),
     openInConfluence: () => { const i = confluenceInfo(S.meta); if (i) window.open(i.url); },
     signOut: async () => { await cf.signOut(); toast('Signed out of Atlassian.'); },
