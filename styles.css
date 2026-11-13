@@ -769,7 +769,7 @@ body.api-note #status-pick, body.api-note #tag-list, body.api-note #tag-input, b
 .agent-head .agent-title .spark { flex: none; }
 .agent-head .spacer { flex: 1 1 0; min-width: 4px; }
 .agent-head .agent-model { flex: none; max-width: 96px; }
-.slash-card { overflow-x: hidden; }
+.slash-card { min-width: 0; overflow-wrap: anywhere; }
 .slash-help span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .agent-head .agent-title { min-width: 74px; }
 .agent-head .agent-project { display: inline-block; max-width: 90px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
@@ -792,3 +792,6 @@ body.api-note #status-pick, body.api-note #tag-list, body.api-note #tag-input, b
 /* Inline suggestions (grey text after the cursor) */
 .cm-ghost { color: var(--faint); opacity: .75; font-style: italic; pointer-events: none; }
 .cm-ghost-key { font: 600 9.5px var(--sans); font-style: normal; color: var(--faint); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; }
+
+/* Chat items never shrink to fit the panel (the log scrolls instead) */
+.agent-log > * { flex-shrink: 0; }
