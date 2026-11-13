@@ -7,6 +7,7 @@ import { createAgentPanel } from './agent-panel.js';
 import { createConfluenceUI, CONFLUENCE_ROOT } from './confluence-ui.js';
 import { confluenceInfo } from './confluence.js';
 import { createComments } from './comments.js';
+import { setupResizers } from './resize.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
 import { moveLineUp, moveLineDown, copyLineDown, deleteLine } from '@codemirror/commands';
 
@@ -1522,6 +1523,7 @@ comments = createComments({
 (async function start() {
   if (SINGLE) document.body.classList.add('single');
   bindUI();
+  setupResizers({ load, store, onResized: () => editor.view.requestMeasure() });
   applySettings(await api.getSettings());
   applyTheme(await api.currentTheme());
   setMode(S.mode);

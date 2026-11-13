@@ -10,6 +10,7 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - **⌘N** new note · **⇧⌘N** new notebook · **⇧⌘F** search
 - **⌘1 / ⌘2 / ⌘3** editor · split · preview · **⇧⌘↵** focus mode
 - Right-click notes, notebooks and the Trash for more options
+- Drag the borders between the sidebar, note list, editor, preview and side panels to resize them (double-click a border to reset)
 
 ## Organise
 

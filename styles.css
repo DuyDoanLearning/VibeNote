@@ -92,14 +92,14 @@ kbd { font: 11px var(--sans); opacity: 0.7; margin-left: 6px; }
 
 #app {
   display: grid;
-  grid-template-columns: 230px 310px minmax(0, 1fr) var(--agent-w, 0px);
+  grid-template-columns: var(--side-w, 230px) var(--list-w, 310px) minmax(0, 1fr) var(--agent-w, 0px);
   height: 100vh;
   /* one row exactly the window's height — without this the row grows with a long note and the whole window scrolls */
   grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   transition: grid-template-columns .2s ease;
 }
-body.no-sidebar #app { grid-template-columns: 0 310px minmax(0, 1fr) var(--agent-w, 0px); }
+body.no-sidebar #app { grid-template-columns: 0 var(--list-w, 310px) minmax(0, 1fr) var(--agent-w, 0px); }
 body.no-sidebar #sidebar { visibility: hidden; }
 body.focus #app, body.single #app { grid-template-columns: 0 0 minmax(0, 1fr) var(--agent-w, 0px); }
 body.focus #sidebar, body.focus #list, body.single #sidebar, body.single #list { visibility: hidden; overflow: hidden; }
@@ -256,7 +256,7 @@ body.in-trash #trash-tools { display: flex; }
 #tag-input::-webkit-calendar-picker-indicator { display: none !important; }
 
 #panes { flex: 1; display: grid; min-height: 0; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
-#panes.split { grid-template-columns: 1fr 1fr; }
+#panes.split { grid-template-columns: minmax(0, var(--split-l, 1fr)) minmax(0, var(--split-r, 1fr)); }
 #panes.edit { grid-template-columns: 1fr; }
 #panes.edit #preview { display: none; }
 #panes.preview { grid-template-columns: 1fr; }
@@ -382,7 +382,7 @@ body.no-note .title-input { display: none; }
 @media print { .markdown .print-title { display: block; } .title-input { display: none !important; } }
 
 /* ---------- Claude panel ---------- */
-body.agent-open { --agent-w: 400px; }
+body.agent-open { --agent-w: var(--claude-w, 400px); }
 #agent { display: none; flex-direction: column; min-width: 0; border-left: 1px solid var(--border); background: var(--list); }
 body.agent-open #agent { display: flex; }
 body.agent-open #agent-btn { color: var(--accent); background: var(--accent-soft); }
@@ -471,7 +471,7 @@ body.agent-open #agent-btn { color: var(--accent); background: var(--accent-soft
 #comments-btn { position: relative; }
 #comments-btn .cm-count { position: absolute; top: 1px; right: 0; font-size: 9.5px; font-weight: 700; color: var(--accent); }
 body.comments-open #comments-btn { color: var(--accent); background: var(--accent-soft); }
-body.comments-open { --agent-w: 340px; }
+body.comments-open { --agent-w: var(--comments-w, 340px); }
 #comments, #agent { grid-column: 4; grid-row: 1; }
 #comments { display: none; flex-direction: column; min-width: 0; border-left: 1px solid var(--border); background: var(--list); }
 body.comments-open #comments { display: flex; }
@@ -539,3 +539,16 @@ body.comments-open #agent { display: none; }
 @container (max-width: 470px) {
   .nb-pick { display: none; }
 }
+
+/* ---------- drag-to-resize borders (src/resize.js) ---------- */
+#sidebar, #list, #editor, #agent, #comments { position: relative; }
+.resizer { position: absolute; top: 0; bottom: 0; width: 7px; z-index: 30; cursor: col-resize; -webkit-app-region: no-drag; }
+.resizer.right { right: -1px; }
+.resizer.left { left: -1px; }
+.resizer::after { content: ''; position: absolute; top: 0; bottom: 0; left: 2px; width: 3px; border-radius: 2px; background: var(--accent); opacity: 0; transition: opacity .12s .15s; }
+.resizer:hover::after, .resizer.drag::after { opacity: .7; transition-delay: 0s; }
+#panes:not(.split) #editor > .resizer { display: none; }
+body.no-sidebar #sidebar > .resizer, body.focus #sidebar > .resizer, body.focus #list > .resizer,
+body.single #sidebar > .resizer, body.single #list > .resizer { display: none; }
+body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
+body.resizing #app { transition: none; }
