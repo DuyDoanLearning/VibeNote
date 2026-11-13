@@ -22,6 +22,8 @@ Ideas discussed with the owner (2026-11-13), not yet decided or built. Owner's t
 
 ## Project hub
 15. **Project vibe coding** (owner, 2026-11-13, still forming): one place per project for all its docs (incl. Confluence pages), where the owner writes and controls the notes and the AI reads them, writes code and reports back as notes.
+16. **Chats ↔ notes and code** (backlog, 2026-11-13): Claude Code transcripts record which files each chat edited → a spec note shows "🔗 Discussed in 3 chats", a code file "Changed in these chats". Feeds ⭐ "Why does this line exist?". (Claude Chats window — browse, continue, save as note — is built.)
+17. **Project memory note** (backlog, 2026-11-13; uses Claude usage): Claude reads a project's past chats and keeps one living note — decisions, architecture choices, open TODOs, things tried that failed — which the Claude panel reads first in every new chat.
 
 ## Fun
 13. "Explain like I'm 5" toggle on explanation notes.

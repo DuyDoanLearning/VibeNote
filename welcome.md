@@ -54,6 +54,12 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - **⌥⌘Y** opens Version History: every version shows **who** made it (You, Claude, Confluence) and **Changes** shows exactly what was added (green) and removed (red).
 - Claude can read the history too — ask it in the Claude panel "what changed in this note today?".
 
+## Your past Claude chats
+
+- Open **Claude Chats** (the 🕘 button in the Claude panel, or ⌘K → *Claude Chats*) to see every Claude Code chat you've had in a project folder — from Terminal, VS Code or VibeNote — and read them as clean conversations.
+- **Continue in Claude panel** picks up where a chat left off; Claude remembers everything. Your new messages go to a copy, so the original chat stays as it was.
+- **Save as note** keeps the conversation as a Markdown note (saving again updates it).
+
 ## Write
 
 - [x] Paste or drag images straight into a note

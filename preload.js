@@ -63,6 +63,13 @@ contextBridge.exposeInMainWorld('vibe', {
     postToConfluence: invoke('confluence:comment'),
   },
   http: { request: invoke('http:request') },
+  chats: {
+    projects: invoke('chats:projects'),
+    list: invoke('chats:list'),
+    read: invoke('chats:read'),
+    continue: invoke('chats:continue'),
+    export: invoke('chats:export'),
+  },
   write: {
     start: invoke('write:start'),
     stop: invoke('write:stop'),

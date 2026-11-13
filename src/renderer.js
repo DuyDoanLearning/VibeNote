@@ -10,6 +10,7 @@ import { createComments } from './comments.js';
 import { setupResizers } from './resize.js';
 import { createWriter } from './writer.js';
 import { createApiDocs } from './apidocs.js';
+import { createChatsUI } from './chats-ui.js';
 import { diffLines } from 'diff';
 import { splitTarget, parseOperation, apiOperations, embeddedSpecs, mdHeadings, linksTo } from './links.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
@@ -1656,6 +1657,7 @@ const COMMANDS = [
   { id: 'sections-collapse', title: 'Collapse All Note List Headings', when: () => !SINGLE && S.sections.length > 0, run: () => setSections(false) },
   { id: 'settings', title: 'Settings', key: '⌘,', run: openSettings },
   { id: 'toggle-agent', title: 'Toggle Claude Panel', key: '⌘J', run: () => { comments.toggle(false); agentPanel.toggle(); } },
+  { id: 'claude-chats', title: 'Claude Chats… (past chats: read, continue, save as note)', when: () => !SINGLE, run: () => chatsUI.open() },
   { id: 'claude-write', title: 'Ask Claude to Write… (/claude)', key: '⇧⌘J', when: needNote, run: () => writer.open() },
   { id: 'add-comment', title: 'Add Comment on Selection', key: '⌥⌘M', when: needNote, run: () => comments.addComment() },
   { id: 'toggle-comments', title: 'Toggle Comments', key: '⇧⌘M', run: () => comments.toggle() },
@@ -1840,6 +1842,28 @@ const agentPanel = createAgentPanel({
   beforeSend: () => save(),
   // Claude edits files directly; the folder watcher picks that up, this just makes it snappy.
   onNoteMaybeChanged: () => { clearTimeout(refreshSoon); refreshSoon = setTimeout(refresh, 150); },
+  openChats: () => chatsUI.open(),
+});
+
+// Claude Chats window: past Claude Code chats → read, continue in the panel, save as a note.
+const chatsUI = createChatsUI({
+  api, $, el, overlay, closeOverlay, toast,
+  getNotebook: () => { const n = currentNote(); return n ? n.notebook : (S.filter.type === 'notebook' ? S.filter.name : ''); },
+  afterContinue: async (key) => {
+    await save();
+    await refresh();
+    setFilter({ type: 'notebook', name: key });
+    const newest = live().filter((n) => inBook(n, key)).sort((a, b) => b.mtime - a.mtime)[0];
+    if (newest) await openNote(newest.path);
+    else { await leaveCurrent(); closeNote(); }
+    agentPanel.toggle(true);
+  },
+  afterExport: async (p) => {
+    await refresh();
+    const n = S.notes.find((x) => x.path === p);
+    if (n && !visibleNotes().includes(n)) setFilter({ type: 'all' });
+    await openNote(p);
+  },
 });
 
 comments = createComments({

@@ -104,6 +104,8 @@ export class AgentChat {
           model: o.model || undefined,
           permissionMode: o.permissionMode || 'default',
           resume: o.resume || undefined,
+          // Continuing a chat from the Claude Chats window: work on a copy, so a Terminal session of it is never disturbed.
+          forkSession: !!(o.resume && o.fork),
           includePartialMessages: true,
           settingSources: ['user', 'project', 'local'],
           systemPrompt: { type: 'preset', preset: 'claude_code', append: o.appendSystemPrompt },

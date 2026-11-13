@@ -27,7 +27,7 @@ const TOOL_LABEL = {
   TodoWrite: 'Updated the to-do list', Task: 'Started a helper', Agent: 'Started a helper',
 };
 
-export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChanged }) {
+export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChanged, openChats }) {
   const root = document.getElementById('agent');
   root.innerHTML = `
     <div class="titlebar agent-head">
@@ -38,6 +38,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
         <option value="acceptEdits">Auto-approve edits</option>
         <option value="plan">Plan only</option>
       </select>
+      <button class="icon agent-chats" title="Past chats (read, continue, save as note)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg></button>
       <button class="icon agent-more" title="More"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button>
       <button class="icon agent-close" title="Close (⌘J)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
@@ -318,6 +319,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
       else if (it.kind === 'tool') addTool(it);
       else if (it.kind === 'result') addResult(it);
       else if (it.kind === 'error') addError(it.message);
+      else if (it.kind === 'note') log.append(el('div', 'result-line', it.text));
     }
     scroll(true);
   }
@@ -380,11 +382,13 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
   async function moreMenu() {
     const items = [
       { id: 'new', label: 'New Chat' },
+      { id: 'chats', label: 'Past Chats…' },
       { type: 'separator' },
       ctx?.repo ? { id: 'unlink', label: `Unlink “${ctx.notebook}” from its code folder` } : { id: 'link', label: 'Link a Code Folder to This Notebook…' },
     ];
     const id = await api.popup(items);
     if (id === 'new') { await api.agent.newChat(ctx.key); await load(); }
+    if (id === 'chats') openChats?.();
     if (id === 'link') link();
     if (id === 'unlink') { await api.agent.unlink(ctx.key); await load(); }
   }
@@ -429,6 +433,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
   $('.agent-stop').addEventListener('click', () => ctx && api.agent.stop(ctx.key));
   $('.agent-mode').addEventListener('change', (e) => setMode(e.target.value));
   $('.agent-more').addEventListener('click', moreMenu);
+  $('.agent-chats').addEventListener('click', () => openChats?.());
   $('.agent-close').addEventListener('click', () => toggle(false));
 
   let lastKey = null;

@@ -15,6 +15,7 @@ const fsp = fs.promises;
 const os = require('os');
 const { pathToFileURL } = require('url');
 const themes = require('./themes');
+const claudeChats = require('./claude-chats');
 const { execFile } = require('child_process');
 
 const isMac = process.platform === 'darwin';
@@ -855,9 +856,10 @@ const chatFile = (key) => path.join(chatsDir(), `${key ? encodeURIComponent(key)
 function readChat(key) {
   try { return JSON.parse(fs.readFileSync(chatFile(key), 'utf8')); } catch { return { sessionId: null, items: [] }; }
 }
+// cwd: set when continuing a chat that was started in a sub-folder of the project. fork: continue a copy (until it starts).
 function writeChat(key, data) {
   fs.mkdirSync(chatsDir(), { recursive: true });
-  fs.writeFileSync(chatFile(key), JSON.stringify({ sessionId: data.sessionId, items: data.items.slice(-400) }, null, 1));
+  fs.writeFileSync(chatFile(key), JSON.stringify({ sessionId: data.sessionId, cwd: data.cwd || undefined, fork: data.fork || undefined, items: data.items.slice(-400) }, null, 1));
 }
 
 function projectFor(notebook) {
@@ -899,7 +901,7 @@ function record(state, evt) {
   const items = state.items;
   const last = items[items.length - 1];
   switch (evt.kind) {
-    case 'init': state.sessionId = evt.sessionId; break;
+    case 'init': state.sessionId = evt.sessionId; state.fork = false; writeChat(state.key, state); break;
     case 'text':
       if (last && last.kind === 'text' && last.streaming) { last.text = evt.text; delete last.streaming; } else items.push({ kind: 'text', text: evt.text });
       break;
@@ -923,9 +925,13 @@ async function ensureChat(wc, key, project) {
   const env = await mod.loginShellEnv();
   const claudePath = mod.findClaude(env, config.settings.agentClaudePath);
   if (!claudePath) throw new Error('Claude Code was not found. Install it (https://claude.com/claude-code) and run `claude` once to log in, or set its path in Settings.');
-  state = { key, wc, items: saved.items || [], sessionId: saved.sessionId || null };
+  // A continued chat runs in the folder it was started in (Claude Code finds chats by folder) — if that's inside the project.
+  const cwd = saved.cwd && project.repo && (saved.cwd === project.repo || saved.cwd.startsWith(project.repo + path.sep)) && fs.existsSync(saved.cwd)
+    ? saved.cwd : project.repo || rootDir();
+  state = { key, wc, items: saved.items || [], sessionId: saved.sessionId || null, cwd: cwd === (project.repo || rootDir()) ? undefined : cwd, fork: !!saved.fork };
   state.chat = new mod.AgentChat({
-    cwd: project.repo || rootDir(),
+    cwd,
+    fork: state.fork,
     additionalDirectories: project.repo ? [rootDir()] : [],
     appendSystemPrompt: systemPromptFor(project),
     model: config.settings.agentModel,
@@ -1035,8 +1041,92 @@ ipcMain.handle('agent:mode', async (_e, key, mode) => {
 ipcMain.handle('agent:new', (_e, key) => {
   const st = chats.get(key);
   if (st) { st.chat.close(); chats.delete(key); }
-  writeChat(key, { sessionId: null, items: [] });
+  writeChat(key, { sessionId: null, items: [] }); // also resets a continued chat's folder
 });
+// ---------- Claude Chats window: past Claude Code chats (read-only), continue one, save one as a note ----------
+const headOf = async (f, n = 600) => {
+  const fh = await fsp.open(f, 'r').catch(() => null);
+  if (!fh) return '';
+  try { const b = Buffer.alloc(n); const { bytesRead } = await fh.read(b, 0, n, 0); return b.subarray(0, bytesRead).toString('utf8'); } finally { await fh.close(); }
+};
+const linkedNotebookFor = (cwd) => Object.entries(config.projects)
+  .filter(([, repo]) => repo && (cwd === repo || cwd.startsWith(repo + path.sep)))
+  .sort((a, b) => b[1].length - a[1].length)[0]?.[0] || null;
+
+ipcMain.handle('chats:projects', async (_e, notebook) => {
+  const projects = await claudeChats.listProjects();
+  const current = projectFor(notebook).repo;
+  return {
+    current: current && projects.find((p) => p.cwd === current) ? current : null,
+    projects: projects.map((p) => ({ ...p, notebook: linkedNotebookFor(p.cwd) })),
+  };
+});
+ipcMain.handle('chats:list', (_e, cwd, subs) => claudeChats.listChats(String(cwd), subs !== false));
+ipcMain.handle('chats:read', (_e, cwd, id) => claudeChats.readChat(String(cwd), String(id)));
+
+// Continue a past chat in the Claude panel of the notebook linked to its folder (linking one if needed).
+ipcMain.handle('chats:continue', async (_e, { cwd, id, createNotebook }) => {
+  const { meta, items } = await claudeChats.readChat(String(cwd), String(id));
+  const folder = meta.cwd || cwd;
+  if (!fs.existsSync(folder)) throw new Error(`The folder this chat ran in no longer exists:\n${folder}`);
+  let key = linkedNotebookFor(folder);
+  if (!key) {
+    if (!createNotebook) return { needsNotebook: true, name: safeName(path.basename(cwd)) };
+    key = safeName(createNotebook);
+    await fsp.mkdir(notebookDir(key), { recursive: true });
+    config.projects[key] = cwd;
+    saveConfig();
+  }
+  const st = chats.get(key);
+  if (st) { st.chat.close(); chats.delete(key); }
+  const repo = config.projects[key];
+  writeChat(key, {
+    sessionId: meta.id,
+    fork: true,
+    cwd: folder !== repo ? folder : undefined,
+    items: [...items.filter((i) => i.kind !== 'note').map(({ at, ...i }) => i), { kind: 'note', text: 'Continued from a past chat — new messages go to a copy; the original is unchanged' }],
+  });
+  return { key };
+});
+
+// Save a chat as a Markdown note (updates the note if this chat was saved before).
+ipcMain.handle('chats:export', async (_e, { cwd, id }) => {
+  const chat = await claudeChats.readChat(String(cwd), String(id));
+  const { meta } = chat;
+  const key = linkedNotebookFor(meta.cwd || cwd);
+  const notebook = key ? `${key}/Claude Chats` : `Claude Chats/${safeName(path.basename(cwd))}`;
+  const all = [];
+  await walk(rootDir(), '', [], all);
+  let file = null;
+  for (const [f] of all) {
+    if (!f.endsWith('.md')) continue;
+    const head = await headOf(f);
+    if (head.includes(`claude-session: ${meta.id}`)) { file = f; break; }
+  }
+  const title = `Chat - ${meta.title}`.slice(0, 120);
+  const body = claudeChats.toMarkdown(chat, cwd);
+  const noteMeta = {
+    title,
+    tags: ['claude-chat'],
+    created: new Date(meta.started || Date.now()).toISOString().slice(0, 10),
+    extra: `claude-session: ${meta.id}\nclaude-folder: ${JSON.stringify(meta.cwd || cwd)}`,
+  };
+  if (file) {
+    await snapshot(file, true, 'Before chat update').catch(() => {});
+    const old = parseNote(await fsp.readFile(file, 'utf8')).meta;
+    noteMeta.tags = [...new Set([...old.tags, 'claude-chat'])];
+    noteMeta.status = old.status;
+    noteMeta.pinned = old.pinned;
+    await fsp.writeFile(file, serializeNote(noteMeta, body, baseOf(file)), 'utf8');
+    return { path: file, updated: true };
+  }
+  const dir = notebookDir(notebook);
+  await fsp.mkdir(dir, { recursive: true });
+  file = uniquePath(dir, safeName(title));
+  await fsp.writeFile(file, serializeNote(noteMeta, body, path.basename(file, '.md')), 'utf8');
+  return { path: file, updated: false };
+});
+
 ipcMain.handle('agent:permission-reply', (_e, id, reply) => {
   const w = permissionWaits.get(id);
   if (!w) return;

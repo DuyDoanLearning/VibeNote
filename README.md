@@ -78,6 +78,7 @@ The notes folder is self-contained, so it can be synced between Macs (iCloud Dri
 |---|---|
 | `main.js` | Electron main process: windows, menus, all file access (notes, trash, history, export, link titles) |
 | `themes.js` | Finds / loads / imports VS Code colour themes; “Same as VS Code” |
+| `claude-chats.js` | Reads (never changes) past Claude Code chats in `~/.claude/projects` for the Claude Chats window |
 | `preload.js` | The only bridge between UI and main (`window.vibe.*`) |
 | `src/renderer.js` | UI: sidebar, note list, toolbar, palette, settings, history, commands |
 | `src/editor.js` | CodeMirror setup: autocomplete, paste/drop, ⌘-click links |
@@ -86,6 +87,7 @@ The notes folder is self-contained, so it can be synced between Macs (iCloud Dri
 | `src/theme.js` | Maps a VS Code theme to VibeNote's CSS variables |
 | `src/search.js` | Search filters and fuzzy matching |
 | `src/agent-panel.js` | The Claude chat panel (messages, tool activity, Allow/Deny cards, questions, plans) |
+| `src/chats-ui.js` | Claude Chats window: browse past chats, continue one in the panel (as a copy), save as a note |
 | `src-main/agent.js` | Agent host: Claude Agent SDK driving the installed Claude Code (bundled to `dist/agent.mjs`) |
 | `styles.css` / `markdown.css` | App styles / preview + export styles |
 | `welcome.md` | Note created on first run |
