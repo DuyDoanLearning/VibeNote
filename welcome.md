@@ -16,7 +16,7 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 
 - Add tags and a status in the bar above the editor
 - Pin important notes with **⌥⌘P**
-- The ⇅ button above the note list sorts the list and **groups** it by notebook (big headings for notebooks, smaller ones for notebooks inside them), by tag, or by type. Click a heading to fold it.
+- The ⇅ button above the note list sorts the list and **groups** it by notebook (big headings for notebooks, smaller ones for notebooks inside them), by tag, or by type. Click a heading to fold it, **⌥-click** to fold it with everything inside, or right-click it (or use ⇅) for **Expand All / Collapse All**.
 - Each note is marked by type: **Note** (red), **Confluence** (blue) or **API** (green)
 - Search with filters: `tag:guide`, `book:Ideas`, `status:active`, `title:welcome`, `is:pinned`, `-tag:old`
 - The title lives in the big field above the editor; it's also the file name

@@ -64,6 +64,7 @@ const S = {
   group: load('group', 'folder'), // note list sections: folder | tag | type | none
   collapsed: new Set(load('collapsed', [])), // collapsed list sections ("folder:Work/Specs", "tag:idea", …)
   order: [], // notes in the order the list shows them (for ↑/↓)
+  sections: [], // keys of the list's headings
   current: null, // path of the open note
   currentId: null, // file identity, survives renames done elsewhere
   meta: null, // metadata of the open note (source of truth while editing)
@@ -883,6 +884,45 @@ function toggleSection(id) {
   renderList();
 }
 
+// Fold or unfold several headings at once: all of them, or one heading and every notebook inside it.
+// S.sections = the headings of the list as last drawn (also the ones hidden inside a folded notebook).
+function setSections(open, under = null) {
+  const mode = S.filter.type === 'trash' ? 'none' : S.group;
+  const inside = (k) => under == null || k === under || (under !== '' && k.startsWith(under + '/'));
+  for (const k of S.sections) {
+    if (!inside(k)) continue;
+    if (open) S.collapsed.delete(`${mode}:${k}`);
+    else S.collapsed.add(`${mode}:${k}`);
+  }
+  store('collapsed', [...S.collapsed]);
+  renderList();
+}
+
+async function sectionMenu(g, mode) {
+  const closed = S.collapsed.has(`${mode}:${g.key}`);
+  const nested = mode === 'folder' && g.key && S.sections.some((k) => k.startsWith(g.key + '/'));
+  const id = await api.popup([
+    { id: 'one', label: closed ? `Expand “${g.label}”` : `Collapse “${g.label}”` },
+    ...(nested ? [
+      { id: 'in-open', label: `Expand “${g.label}” and Everything Inside` },
+      { id: 'in-close', label: `Collapse Everything Inside “${g.label}”` },
+    ] : []),
+    { type: 'separator' },
+    { id: 'all-open', label: 'Expand All' },
+    { id: 'all-close', label: 'Collapse All' },
+  ]);
+  if (id === 'one') toggleSection(`${mode}:${g.key}`);
+  else if (id === 'in-open') setSections(true, g.key);
+  else if (id === 'in-close') {
+    // keep this heading open, fold the notebooks inside it
+    S.collapsed.delete(`${mode}:${g.key}`);
+    for (const k of S.sections) if (k.startsWith(g.key + '/')) S.collapsed.add(`${mode}:${k}`);
+    store('collapsed', [...S.collapsed]);
+    renderList();
+  } else if (id === 'all-open') setSections(true);
+  else if (id === 'all-close') setSections(false);
+}
+
 function setGroup(g) {
   S.group = g;
   store('group', g);
@@ -901,7 +941,9 @@ function sectionHead(g, mode, count, closed) {
   if (g.color) h.append(dot(g.color));
   h.append(el('span', 'group-label', g.label), el('span', 'group-count', count ? String(count) : ''));
   h.title = mode === 'folder' && g.key ? g.key : g.label;
-  h.addEventListener('click', () => toggleSection(id));
+  // ⌥-click: fold/unfold this heading together with every notebook inside it
+  h.addEventListener('click', (e) => (e.altKey ? setSections(closed, g.key) : toggleSection(id)));
+  h.addEventListener('contextmenu', (e) => { e.preventDefault(); sectionMenu(g, mode); });
   if (mode === 'folder') makeDropTarget(h, g.key);
   return h;
 }
@@ -960,6 +1002,7 @@ function renderList() {
   const ul = $('#notes');
   ul.textContent = '';
   S.order = [];
+  S.sections = [];
   if (!list.length) {
     const msg = S.query ? 'No matching notes' : S.filter.type === 'trash' ? 'Trash is empty' : 'No notes yet. Press ⌘N';
     ul.append(el('li', 'list-empty', msg));
@@ -969,7 +1012,9 @@ function renderList() {
   const frag = document.createDocumentFragment();
   const seen = new Set();
   let hiddenUnder = null; // a collapsed notebook hides the notebooks inside it too
-  for (const g of groupedNotes(list)) {
+  const groups = groupedNotes(list);
+  S.sections = groups.filter((g) => g.label).map((g) => g.key);
+  for (const g of groups) {
     if (hiddenUnder != null && mode === 'folder' && g.key.startsWith(hiddenUnder + '/')) continue;
     hiddenUnder = null;
     const closed = !!g.label && S.collapsed.has(`${mode}:${g.key}`);
@@ -1266,7 +1311,13 @@ async function sortMenu() {
     { id: 'group:tag', label: 'Tag', checked: S.group === 'tag' },
     { id: 'group:type', label: 'Type (Note / Confluence / API)', checked: S.group === 'type' },
     { id: 'group:none', label: 'No Groups', checked: S.group === 'none' },
+    ...(S.sections.length ? [
+      { type: 'separator' },
+      { id: 'expand-all', label: 'Expand All' },
+      { id: 'collapse-all', label: 'Collapse All' },
+    ] : []),
   ]);
+  if (id === 'expand-all' || id === 'collapse-all') return setSections(id === 'expand-all');
   if (id?.startsWith('group:')) setGroup(id.slice(6));
   else if (id) setSort(id);
 }
@@ -1599,6 +1650,8 @@ const COMMANDS = [
   { id: 'group-tag', title: 'Group Notes by Tag', when: () => !SINGLE, run: () => setGroup('tag') },
   { id: 'group-type', title: 'Group Notes by Type', when: () => !SINGLE, run: () => setGroup('type') },
   { id: 'group-none', title: 'Don’t Group Notes', when: () => !SINGLE, run: () => setGroup('none') },
+  { id: 'sections-expand', title: 'Expand All Note List Headings', when: () => !SINGLE && S.sections.length > 0, run: () => setSections(true) },
+  { id: 'sections-collapse', title: 'Collapse All Note List Headings', when: () => !SINGLE && S.sections.length > 0, run: () => setSections(false) },
   { id: 'settings', title: 'Settings', key: '⌘,', run: openSettings },
   { id: 'toggle-agent', title: 'Toggle Claude Panel', key: '⌘J', run: () => { comments.toggle(false); agentPanel.toggle(); } },
   { id: 'claude-write', title: 'Ask Claude to Write… (/claude)', key: '⇧⌘J', when: needNote, run: () => writer.open() },
