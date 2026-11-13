@@ -31,6 +31,13 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - Type **/claude** on a new line (or press **⇧⌘J**) and ask for something: a table, a checklist, a summary, a diagram… Claude's Markdown appears as it's written; click **Insert** to add it.
 - Select text first and press **⇧⌘J** to have Claude rewrite it (**Replace**). Type a new request in the box to adjust the result.
 
+## API specs (Swagger / OpenAPI)
+
+- **⌥⌘N** creates an API spec (a `.yaml` file in your notes folder, marked **API** in the list). Edit the YAML on the left; the Swagger docs update on the right. Mistakes show as “Line N: …” — click to jump there.
+- **Try it out → Execute** calls the real API from VibeNote (no browser CORS errors). Tokens entered under **Authorize** are forgotten when VibeNote closes.
+- A ` ```yaml ` OpenAPI block inside any note (e.g. a Confluence page) gets an **⚡ API docs** button in the preview.
+- **/claude** works in specs too: “add a POST /bookings endpoint with a 409 conflict response”.
+
 ## Comments
 
 - Select text and click **💬** (or **⌥⌘M**) to comment on it; **⇧⌘M** shows all comments.

@@ -67,6 +67,7 @@
   background: var(--panel, #f6f6f9); color: var(--muted); border: 1px solid var(--border); opacity: 0; transition: opacity .15s; cursor: pointer;
 }
 .markdown .code-wrap:hover .copy-btn { opacity: 1; }
+.markdown .api-btn { right: 64px; opacity: 1; color: var(--accent); border-color: var(--accent); font-weight: 600; }
 
 @media print {
   .markdown pre, .markdown img, .markdown .mermaid, .markdown table { break-inside: avoid; }

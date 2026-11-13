@@ -7,6 +7,11 @@ cpSync('node_modules/katex/dist/katex.min.css', 'dist/katex/katex.min.css');
 cpSync('node_modules/katex/dist/fonts', 'dist/katex/fonts', { recursive: true });
 writeFileSync('dist/katex/version.txt', JSON.parse(readFileSync('node_modules/katex/package.json', 'utf8')).version);
 cpSync('node_modules/mermaid/dist/mermaid.min.js', 'dist/mermaid.min.js');
+// Swagger UI (Apache-2.0) for API specs — loaded lazily like Mermaid.
+mkdirSync('dist/swagger', { recursive: true });
+cpSync('node_modules/swagger-ui-dist/swagger-ui-bundle.js', 'dist/swagger/swagger-ui-bundle.js');
+cpSync('node_modules/swagger-ui-dist/swagger-ui.css', 'dist/swagger/swagger-ui.css');
+cpSync('node_modules/swagger-ui-dist/LICENSE', 'dist/swagger/LICENSE');
 
 await build({
   entryPoints: ['src/renderer.js'],

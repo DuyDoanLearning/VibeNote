@@ -21,6 +21,55 @@ const isMac = process.platform === 'darwin';
 const TRASH = '.trash';
 const ASSETS = '.assets';
 const STATUSES = ['active', 'onhold', 'completed', 'dropped'];
+// OpenAPI / Swagger specs (.yaml / .yml / .json) are notes too: shown with an API editor + Swagger docs.
+// Other YAML/JSON files in the notes folder are ignored.
+const API_EXTS = ['.yaml', '.yml', '.json'];
+const isApiFile = (f) => API_EXTS.includes(path.extname(f).toLowerCase());
+const isNoteFile = (f) => f.toLowerCase().endsWith('.md') || isApiFile(f);
+const baseOf = (f) => path.basename(f, path.extname(f));
+const looksLikeOpenApi = (text) => /^\s*["']?(openapi|swagger)["']?\s*:/m.test(String(text).slice(0, 4000));
+const API_TEMPLATE = (title) => `openapi: 3.1.0
+info:
+  title: ${JSON.stringify(title)}
+  version: 1.0.0
+  description: Describe your API here. Edit on the left, the docs update on the right.
+servers:
+  - url: https://petstore3.swagger.io/api/v3
+    description: Example server (Swagger's public Petstore demo)
+paths:
+  /pet/{petId}:
+    get:
+      summary: Find a pet by ID
+      tags: [pet]
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+            example: 1
+      responses:
+        '200':
+          description: The pet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+        '404':
+          description: Pet not found
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        status:
+          type: string
+          enum: [available, pending, sold]
+`;
 const DEFAULT_SETTINGS = {
   theme: 'system',
   editorFont: 'mono',
@@ -89,9 +138,9 @@ function safeName(title) {
 }
 
 // First free "<base>.md", "<base> 2.md", … in dir. `current` counts as free (it's the file being renamed).
-function uniquePath(dir, base, current) {
+function uniquePath(dir, base, current, ext = '.md') {
   for (let i = 1; ; i++) {
-    const p = path.join(dir, (i === 1 ? base : `${base} ${i}`) + '.md');
+    const p = path.join(dir, (i === 1 ? base : `${base} ${i}`) + ext);
     if ((current && samePath(p, current)) || !fs.existsSync(p)) return p;
   }
 }
@@ -156,7 +205,18 @@ function serializeNote(meta = {}, body = '', fileBase = '') {
 
 // ---------- vault ----------
 async function readNote(file, notebook, extra = {}) {
-  const [text, st] = await Promise.all([fsp.readFile(file, 'utf8'), fsp.stat(file)]);
+  const st = await fsp.stat(file);
+  if (isApiFile(file) && st.size > 5e6) throw new Error('too big');
+  const text = await fsp.readFile(file, 'utf8');
+  if (isApiFile(file)) {
+    if (!looksLikeOpenApi(text)) throw new Error('not an API spec');
+    const name = baseOf(file);
+    return {
+      id: `${st.dev}-${st.ino}`, path: file, notebook, name, title: name, body: text, kind: 'api',
+      meta: { title: name, tags: [], status: '', pinned: false, created: '', extra: '' },
+      mtime: st.mtimeMs, ctime: st.birthtimeMs, ...extra,
+    };
+  }
   const { meta, body } = parseNote(text);
   const name = path.basename(file, '.md');
   meta.title = meta.title || name;
@@ -178,7 +238,7 @@ async function readNote(file, notebook, extra = {}) {
 async function mdFiles(dir) {
   const ents = await fsp.readdir(dir, { withFileTypes: true });
   return ents
-    .filter((e) => e.isFile() && !e.name.startsWith('.') && e.name.toLowerCase().endsWith('.md'))
+    .filter((e) => e.isFile() && !e.name.startsWith('.') && isNoteFile(e.name))
     .map((e) => path.join(dir, e.name));
 }
 
@@ -191,7 +251,7 @@ async function walk(dir, rel, notebooks, files) {
       const r = rel ? `${rel}/${e.name}` : e.name;
       notebooks.push(r);
       await walk(full, r, notebooks, files);
-    } else if (e.isFile() && e.name.toLowerCase().endsWith('.md')) {
+    } else if (e.isFile() && isNoteFile(e.name)) {
       files.push([full, rel]);
     }
   }
@@ -217,9 +277,9 @@ async function listVault() {
 }
 
 // Move a note file into destDir, bringing along any ".assets/…" files it links to.
-async function moveNoteFile(file, destDir, base = path.basename(file, '.md')) {
+async function moveNoteFile(file, destDir, base = baseOf(file)) {
   await fsp.mkdir(destDir, { recursive: true });
-  const dest = uniquePath(destDir, base);
+  const dest = uniquePath(destDir, base, undefined, path.extname(file).toLowerCase() || '.md');
   await fsp.rename(file, dest);
   const srcDir = path.dirname(file);
   if (!samePath(srcDir, destDir)) {
@@ -331,6 +391,10 @@ ipcMain.handle('vault:choose', async (e) => {
 
 ipcMain.handle('note:read', async (_e, p) => {
   const file = inRoot(p);
+  if (isApiFile(file)) {
+    const name = baseOf(file);
+    return { kind: 'api', body: await fsp.readFile(file, 'utf8'), meta: { title: name, tags: [], status: '', pinned: false, created: '', extra: '' } };
+  }
   const note = parseNote(await fsp.readFile(file, 'utf8'));
   note.meta.title = note.meta.title || path.basename(file, '.md');
   return note;
@@ -341,21 +405,29 @@ ipcMain.handle('note:save', async (_e, p, meta, body, forceSnapshot) => {
   let file = inRoot(p);
   if (file.startsWith(trashDir() + path.sep)) throw new Error('Notes in the Trash are read-only');
   const title = String(meta.title || '').trim() || 'Untitled';
-  const desired = uniquePath(path.dirname(file), safeName(title), file);
+  const api = isApiFile(file);
+  const desired = uniquePath(path.dirname(file), safeName(title), file, api ? path.extname(file).toLowerCase() : '.md');
   if (desired !== file) {
     await fsp.rename(file, desired);
     file = desired;
   }
-  await fsp.writeFile(file, serializeNote({ ...meta, title }, body, path.basename(file, '.md')), 'utf8');
+  // API specs are written exactly as typed (no front matter).
+  await fsp.writeFile(file, api ? body : serializeNote({ ...meta, title }, body, path.basename(file, '.md')), 'utf8');
   snapshot(file, forceSnapshot).catch(() => {});
   return file;
 });
 
 ipcMain.handle('note:snapshot', (_e, p) => snapshot(inRoot(p), true).catch(() => {}));
 
-ipcMain.handle('note:create', async (_e, notebook, title) => {
+ipcMain.handle('note:create', async (_e, notebook, title, kind) => {
   const dir = notebookDir(notebook);
   await fsp.mkdir(dir, { recursive: true });
+  if (kind === 'api') {
+    const name = title || 'New API';
+    const file = uniquePath(dir, safeName(name), undefined, '.yaml');
+    await fsp.writeFile(file, API_TEMPLATE(name), { flag: 'wx' });
+    return file;
+  }
   const file = uniquePath(dir, safeName(title || 'Untitled'));
   await fsp.writeFile(file, serializeNote({ title: title || '' }, '', path.basename(file, '.md')), { flag: 'wx' });
   return file;
@@ -373,7 +445,7 @@ ipcMain.handle('note:trash', async (_e, p) => {
   const from = path.relative(rootDir(), path.dirname(file)).split(path.sep).join('/');
   const dest = await moveNoteFile(file, trashDir());
   await withTrashIndex((ix) => {
-    ix[path.basename(dest)] = { from, name: path.basename(file, '.md'), deletedAt: Date.now() };
+    ix[path.basename(dest)] = { from, name: baseOf(file), deletedAt: Date.now() };
   });
   return dest;
 });
@@ -385,7 +457,7 @@ ipcMain.handle('note:restore', async (_e, p) => {
     const info = ix[key] || {};
     let dir;
     try { dir = notebookDir(info.from || ''); } catch { dir = rootDir(); }
-    const dest = await moveNoteFile(file, dir, info.name || path.basename(file, '.md'));
+    const dest = await moveNoteFile(file, dir, info.name || baseOf(file));
     delete ix[key];
     return dest;
   });
@@ -481,7 +553,9 @@ ipcMain.handle('note:history', async (_e, p) => {
 ipcMain.handle('note:history-read', async (_e, p, id) => {
   if (!/^\d+\.md$/.test(id)) throw new Error('Bad snapshot id');
   const file = inRoot(p);
-  const note = parseNote(await fsp.readFile(path.join(await histDir(file), id), 'utf8'));
+  const text = await fsp.readFile(path.join(await histDir(file), id), 'utf8');
+  if (isApiFile(file)) return { kind: 'api', body: text, meta: { title: baseOf(file), tags: [], status: '', pinned: false, created: '', extra: '' } };
+  const note = parseNote(text);
   note.meta.title = note.meta.title || path.basename(file, '.md');
   return note;
 });
@@ -949,6 +1023,39 @@ ipcMain.handle('comments:ask', async (_e, { title, note, quote, thread }) => {
   return { reply, suggestion: sug != null && sug !== quote ? sug : null };
 });
 
+// ---------- Swagger "Try it out": requests are sent from here, so browser CORS rules don't block them ----------
+// Node's fetch, no cookies or saved state; tokens only live in the open Swagger page (forgotten on quit).
+ipcMain.handle('http:request', async (_e, { method = 'GET', url, headers = {}, body }) => {
+  let u;
+  try { u = new URL(url); } catch { return { error: `“${url}” isn't a full address. Add a server URL (https://…) under "servers" in the spec.` }; }
+  if (!/^https?:$/.test(u.protocol)) return { error: `“${url}” isn't an http(s) address. Add a server URL (https://…) under "servers" in the spec.` };
+  const h = { ...headers };
+  for (const k of Object.keys(h)) if (/^(host|content-length|connection)$/i.test(k)) delete h[k];
+  let payload;
+  if (body?.type === 'text') payload = body.data;
+  else if (body?.type === 'bytes') payload = Buffer.from(body.data);
+  else if (body?.type === 'form') {
+    payload = new FormData();
+    for (const part of body.parts) {
+      if (part.file) payload.append(part.name, new Blob([Buffer.from(part.file.bytes)], { type: part.file.type || 'application/octet-stream' }), part.file.name);
+      else payload.append(part.name, part.value);
+    }
+    for (const k of Object.keys(h)) if (/^content-type$/i.test(k)) delete h[k]; // fetch sets the multipart boundary
+  }
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 60_000);
+  try {
+    const r = await fetch(u, { method, headers: h, body: /^(GET|HEAD)$/i.test(method) ? undefined : payload, redirect: 'follow', signal: ac.signal });
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > 20e6) return { error: 'The response is larger than 20 MB, so VibeNote did not show it.' };
+    return { status: r.status, statusText: r.statusText, headers: [...r.headers], body: new Uint8Array(buf) };
+  } catch (e) {
+    return { error: ac.signal.aborted ? 'No answer within 60 seconds.' : `Could not reach ${u.host}: ${e.cause?.message || e.message}` };
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
 // ---------- /claude: Claude writes Markdown at the cursor ----------
 const WRITE_SYSTEM = `You write Markdown that will be inserted into a note in VibeNote (a Markdown notes app), at the user's cursor.
 Output ONLY the Markdown to insert: no preamble, no explanation, no closing remarks, and do not wrap it in a \`\`\`markdown fence.
@@ -957,9 +1064,14 @@ VibeNote supports GitHub-flavored Markdown (tables, task lists "- [ ]"), callout
 Never create or change \`\`\`confluence blocks.
 If selected text is given, output the replacement for the selected text.
 If a previous draft is given, revise that draft according to the new request.`;
+const WRITE_OPENAPI_SYSTEM = `You edit an OpenAPI (Swagger) spec written in YAML, in VibeNote. Your output is inserted at the user's cursor.
+Output ONLY the YAML to insert: no explanation and no \`\`\` fence. Indent it so it fits exactly where the cursor is
+(the indentation of the cursor line is given). Keep the spec valid OpenAPI 3.x and consistent with the rest of it
+(reuse existing components/schemas with $ref where sensible). If selected text is given, output its replacement.
+If a previous draft is given, revise that draft according to the new request.`;
 const writes = new Map(); // id → AbortController
 
-ipcMain.handle('write:start', async (e, id, { title, before, after, selection, request, draft }) => {
+ipcMain.handle('write:start', async (e, id, { title, before, after, selection, request, draft, kind }) => {
   const mod = await loadAgent();
   const env = await mod.loginShellEnv();
   const claudePath = mod.findClaude(env, config.settings.agentClaudePath);
@@ -972,11 +1084,12 @@ ipcMain.handle('write:start', async (e, id, { title, before, after, selection, r
     `<after_cursor>\n${String(after).slice(0, 2000)}\n</after_cursor>`,
     selection ? `<selected_text>\n${selection}\n</selected_text>` : '',
     draft ? `<previous_draft>\n${draft}\n</previous_draft>` : '',
+    kind === 'api' ? `Indentation of the cursor line: ${JSON.stringify((/[^\n]*$/.exec(String(before))[0].match(/^\s*/) || [''])[0])}` : '',
     `<request>\n${request}\n</request>`,
   ].filter(Boolean);
   try {
     return await mod.askOnce({
-      prompt: parts.join('\n\n'), system: WRITE_SYSTEM, claudePath, env, model: config.settings.agentModel, cwd: rootDir(), signal: ac.signal,
+      prompt: parts.join('\n\n'), system: kind === 'api' ? WRITE_OPENAPI_SYSTEM : WRITE_SYSTEM, claudePath, env, model: config.settings.agentModel, cwd: rootDir(), signal: ac.signal,
       onDelta: (text) => { if (!e.sender.isDestroyed()) e.sender.send('write:delta', { id, text }); },
     });
   } finally {
@@ -1091,6 +1204,7 @@ function buildMenu() {
       label: 'File',
       submenu: [
         item('New Note', 'new-note', 'CmdOrCtrl+N'),
+        item('New API Spec (Swagger)', 'new-api', 'CmdOrCtrl+Alt+N'),
         item('New Notebook', 'new-notebook', 'CmdOrCtrl+Shift+N'),
         item('Open Note in New Window', 'open-window', 'CmdOrCtrl+Alt+O'),
         { type: 'separator' },

@@ -172,6 +172,15 @@ export async function postProcess(root, { dir, dark, onTask, copyButtons = false
         setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
       });
       wrap.append(btn);
+      // OpenAPI / Swagger spec in a ```yaml / ```json block → open it as Swagger docs
+      if (/language-(ya?ml|json)/.test(code.className) && /^\s*["']?(openapi|swagger)["']?\s*:/m.test(code.textContent.slice(0, 4000))) {
+        const apiBtn = document.createElement('button');
+        apiBtn.className = 'copy-btn api-btn';
+        apiBtn.textContent = '⚡ API docs';
+        apiBtn.title = 'Open this spec as Swagger docs (with Try it out)';
+        apiBtn.addEventListener('click', () => window.dispatchEvent(new CustomEvent('vibe:api-docs', { detail: code.textContent })));
+        wrap.append(apiBtn);
+      }
     });
   }
   root.querySelectorAll('pre code').forEach((c) => {

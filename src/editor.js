@@ -11,6 +11,8 @@ import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
+import { yaml } from '@codemirror/lang-yaml';
+import { json } from '@codemirror/lang-json';
 import { vim } from '@replit/codemirror-vim';
 import { tags as t } from '@lezer/highlight';
 import { typingKeymap, listMarkers, slashComplete, emojiComplete, fenceComplete } from './typing.js';
@@ -98,7 +100,9 @@ const TASK_RE = /^((?:\s*>)*\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])\]/;
 const URL_RE = /^https?:\/\/[^\s<>"]+$/;
 
 export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClick, onPasteUrl, getTitles, onSelection, onCommentClick }) {
-  const comps = { vim: new Compartment(), gutter: new Compartment(), spell: new Compartment(), ro: new Compartment() };
+  const comps = { vim: new Compartment(), gutter: new Compartment(), spell: new Compartment(), ro: new Compartment(), lang: new Compartment() };
+  let lang = 'markdown'; // 'markdown' | 'yaml' | 'json' (API specs)
+  const langExt = () => (lang === 'yaml' ? yaml() : lang === 'json' ? json() : [markdown({ base: markdownLanguage, codeLanguages: languages }), listMarkers, EditorView.lineWrapping]);
   let settings = {};
   let readOnly = false;
   let silent = false;
@@ -152,9 +156,7 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
     highlightSelectionMatches(),
     typingKeymap,
     keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
-    markdown({ base: markdownLanguage, codeLanguages: languages }),
-    listMarkers,
-    EditorView.lineWrapping,
+    comps.lang.of(langExt()),
     theme,
     comps.spell.of(spellExt()),
     comps.ro.of(roExt()),
@@ -235,8 +237,9 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
   return {
     view,
     text: () => view.state.doc.toString(),
-    setDoc(text, ro = false) {
+    setDoc(text, ro = false, language = 'markdown') {
       readOnly = ro;
+      lang = language;
       view.setState(EditorState.create({ doc: text, extensions: extensions() }));
     },
     // Replace the whole document. asEdit=false means "came from disk": don't mark the note dirty.

@@ -9,6 +9,7 @@ import { confluenceInfo } from './confluence.js';
 import { createComments } from './comments.js';
 import { setupResizers } from './resize.js';
 import { createWriter } from './writer.js';
+import { createApiDocs } from './apidocs.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
 import { moveLineUp, moveLineDown, copyLineDown, deleteLine } from '@codemirror/commands';
 
@@ -79,6 +80,8 @@ const inBook = (n, nb) => n.notebook === nb || n.notebook.startsWith(nb + '/');
 const live = () => S.notes.filter((n) => !n.trashed);
 const currentNote = () => S.notes.find((n) => n.path === S.current);
 const isTrashed = () => !!currentNote()?.trashed;
+const isApi = () => currentNote()?.kind === 'api';
+const langOf = (n) => (n?.kind === 'api' ? (/\.json$/i.test(n.path) ? 'json' : 'yaml') : 'markdown');
 const isDark = () => matchMedia('(prefers-color-scheme: dark)').matches;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -121,6 +124,7 @@ const editor = createEditor({
   onCommentClick: (id) => comments?.commentClicked(id),
 });
 setLinkResolver((title) => !!findByTitle(title));
+const apiDocs = createApiDocs({ api, container: $('#apidocs'), onJump: (line) => editor.gotoLine(line) });
 
 // ---------- saving ----------
 let saveTimer = null;
@@ -256,13 +260,13 @@ async function openNote(path) {
   }
   let data;
   try { data = await api.read(path); } catch { return refresh(); }
-  Object.assign(n, { meta: data.meta, body: data.body, title: data.meta.title });
+  Object.assign(n, { meta: data.meta, body: data.body, title: data.meta.title, ...(data.kind && { kind: data.kind }) });
   S.current = path;
   S.currentId = n.id;
   S.meta = data.meta;
   S.dirty = false;
   S.touched = false;
-  editor.setDoc(data.body, !!n.trashed);
+  editor.setDoc(data.body, !!n.trashed, langOf(n));
   if (!SINGLE) store('last', path);
   renderAll();
   renderPreview();
@@ -279,19 +283,20 @@ function closeNote() {
   S.meta = null;
   S.dirty = false;
   editor.setDoc('');
+  apiDocs.clear();
   renderAll();
   updateTitle();
   comments?.noteOpened();
 }
 
-async function newNote(title) {
+async function newNote(title, kind) {
   const f = S.filter;
   const nb = f.type === 'notebook' ? f.name : SINGLE && currentNote() ? currentNote().notebook : '';
   await leaveCurrent();
   if (f.type === 'trash') setFilter({ type: 'all' });
   try {
-    const p = await api.create(nb, typeof title === 'string' ? title : '');
-    if (typeof title !== 'string') S.fresh.add(p);
+    const p = await api.create(nb, typeof title === 'string' ? title : '', kind);
+    if (typeof title !== 'string' && kind !== 'api') S.fresh.add(p);
     S.query = '';
     $('#search').value = '';
     await refresh();
@@ -559,6 +564,12 @@ function visibleNotes() {
 }
 
 function snippet(n) {
+  if (n.kind === 'api') {
+    const title = /^\s{2}title:\s*["']?(.+?)["']?\s*$/m.exec(n.body)?.[1] || 'OpenAPI spec';
+    const ops = (n.body.match(/^\s+(get|post|put|patch|delete|head|options):\s*$/gm) || []).length;
+    const ver = /^\s*["']?(openapi|swagger)["']?\s*:\s*["']?([\d.]+)/m.exec(n.body)?.[2] || '';
+    return `${title} · ${ops} endpoint${ops === 1 ? '' : 's'} · OpenAPI ${ver}`;
+  }
   let lines = n.body.split('\n');
   const first = lines.findIndex((l) => l.trim());
   if (first >= 0 && /^#{1,6}\s/.test(lines[first]) && lines[first].replace(/^#+\s+/, '').trim() === n.title) lines = lines.slice(first + 1);
@@ -762,6 +773,7 @@ function renderList() {
     if (n.path === S.current) li.classList.add('active');
 
     const head = el('div', 'note-title');
+    if (n.kind === 'api') head.append(el('span', 'api-badge', 'API'));
     if (n.meta.pinned && !n.trashed) head.append(iconEl(ICON.pin, 'pin-ico'));
     head.append(el('span', '', n.title || 'Untitled'));
     li.append(head);
@@ -805,6 +817,7 @@ function renderToolbar() {
   const n = currentNote();
   document.body.classList.toggle('no-note', !n);
   document.body.classList.toggle('in-trash', !!n?.trashed);
+  document.body.classList.toggle('api-note', n?.kind === 'api');
   const sel = $('#nb-select');
   sel.textContent = '';
   sel.append(new Option('Inbox', ''));
@@ -864,6 +877,7 @@ function schedulePreview() {
 }
 async function renderPreview(force = false) {
   if ((S.mode === 'edit' && !force) || !S.current) return;
+  if (isApi()) { apiDocs.show(S.currentId, editor.text()); return; }
   const seq = ++previewSeq;
   const tmp = document.createElement('div');
   const text = editor.text();
@@ -1306,6 +1320,7 @@ async function openHistory() {
 const needNote = () => !!S.current && !isTrashed();
 const COMMANDS = [
   { id: 'new-note', title: 'New Note', key: '⌘N', run: () => newNote() },
+  { id: 'new-api', title: 'New API Spec (Swagger / OpenAPI)', key: '⌥⌘N', run: () => newNote(undefined, 'api') },
   { id: 'new-notebook', title: 'New Notebook', key: '⇧⌘N', run: () => newNotebook(), when: () => !SINGLE },
   { id: 'search', title: 'Search Notes', key: '⇧⌘F', run: focusSearch },
   { id: 'palette', run: () => openPalette() },
@@ -1320,8 +1335,8 @@ const COMMANDS = [
   { id: 'copy-link', title: 'Copy Link to Note', key: '⌥⌘L', when: () => !!S.current, run: () => copyLink() },
   { id: 'history', title: 'Version History', key: '⌥⌘Y', when: needNote, run: openHistory },
   { id: 'open-window', title: 'Open Note in New Window', key: '⌥⌘O', when: () => !!S.current && !SINGLE, run: async () => { await save(); api.openWindow(S.current); } },
-  { id: 'export-html', title: 'Export as HTML', when: () => !!S.current, run: () => exportNote('html') },
-  { id: 'export-pdf', title: 'Export as PDF', key: '⇧⌘E', when: () => !!S.current, run: () => exportNote('pdf') },
+  { id: 'export-html', title: 'Export as HTML', when: () => !!S.current && !isApi(), run: () => exportNote('html') },
+  { id: 'export-pdf', title: 'Export as PDF', key: '⇧⌘E', when: () => !!S.current && !isApi(), run: () => exportNote('pdf') },
   { id: 'print', title: 'Print', key: '⌘P', when: () => !!S.current, run: printNote },
   { id: 'reveal', title: 'Reveal Note in Finder', key: '⇧⌘R', when: () => !!S.current, run: () => api.reveal(S.current) },
   { id: 'trash', title: 'Move Note to Trash', when: needNote, run: () => trashNote(S.current) },
@@ -1522,7 +1537,15 @@ comments = createComments({
   closeAgent: () => { if (document.body.classList.contains('agent-open')) agentPanel.toggle(false); },
 });
 
-const writer = createWriter({ api, S, $, el, editor, isTrashed, toast, isDark, dirOf });
+const writer = createWriter({ api, S, $, el, editor, isTrashed, toast, isDark, dirOf, isApi });
+
+// ```yaml / ```json OpenAPI blocks in a note's preview get an "API docs" button → Swagger in a big window.
+window.addEventListener('vibe:api-docs', (e) => {
+  const ov = overlay('modal-ov');
+  ov.innerHTML = '<div class="modal api-modal"><div class="api-modal-head"><h2>API docs</h2><span class="hint">From the code block in this note · Try it out works here too</span><div class="spacer"></div><button class="btn" data-act="close">Close</button></div><div class="api-modal-body"></div></div>';
+  $('[data-act=close]', ov).addEventListener('click', closeOverlay);
+  createApiDocs({ api, container: $('.api-modal-body', ov) }).show('block:' + e.detail.length + ':' + e.detail.slice(0, 200), e.detail);
+});
 
 (async function start() {
   if (SINGLE) document.body.classList.add('single');

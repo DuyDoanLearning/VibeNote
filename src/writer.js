@@ -5,12 +5,12 @@ import { renderMarkdown, postProcess } from './markdown.js';
 
 // Claude sometimes wraps everything in ```markdown … ``` — unwrap that.
 const unwrap = (s) => {
-  const m = /^\s*```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i.exec(s);
+  const m = /^\s*```(?:markdown|md|ya?ml|json)?\s*\n([\s\S]*?)\n```\s*$/i.exec(s);
   return (m ? m[1] : s).replace(/^\n+|\s+$/g, '');
 };
 
 export function createWriter(ctx) {
-  const { api, S, $, el, editor, isTrashed, toast, isDark, dirOf } = ctx;
+  const { api, S, $, el, editor, isTrashed, toast, isDark, dirOf, isApi = () => false } = ctx;
   const box = el('div', 'cw');
   box.hidden = true;
   box.innerHTML = `
@@ -123,6 +123,7 @@ export function createWriter(ctx) {
         selection: at.selection,
         request,
         draft: revise,
+        kind: isApi() ? 'api' : 'note',
       });
       if (runId !== id) return; // stopped or replaced
       draft = final || draft;
@@ -142,9 +143,18 @@ export function createWriter(ctx) {
   }
 
   function insert() {
-    const md = unwrap(draft);
+    let md = unwrap(draft);
     if (!md || !at) return;
     const doc = editor.text();
+    if (isApi()) {
+      // YAML goes in exactly where the cursor is; keep the following text on its own line.
+      const replaced = !!at.selection;
+      if (doc[at.to] && doc[at.to] !== '\n' && !md.endsWith('\n')) md += '\n';
+      editor.replaceRange(at.from, at.to, md);
+      close();
+      toast(replaced ? 'Replaced with Claude’s version.' : 'Inserted.');
+      return;
+    }
     // Keep block content on its own lines.
     const lineStart = at.from === 0 || doc[at.from - 1] === '\n';
     const block = /\n/.test(md) || /^(#|\||- |\d+\. |>|```)/.test(md);
