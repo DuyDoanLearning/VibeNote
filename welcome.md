@@ -56,8 +56,9 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 
 ## Your past Claude chats
 
-- Open **Claude Chats** (the 🕘 button in the Claude panel, or ⌘K → *Claude Chats*) to see every Claude Code chat you've had in a project folder — from Terminal, VS Code or VibeNote — and read them as clean conversations.
+- Open **Claude Chats** (the 🕘 button in the Claude panel, or ⌘K → *Claude Chats*) to see every Claude Code chat you've had in a project folder — from Terminal, VS Code, VibeNote or **T3 Code** (including its helper threads) — and read them as clean conversations.
 - **Continue in Claude panel** picks up where a chat left off; Claude remembers everything. Your new messages go to a copy, so the original chat stays as it was.
+- T3 Code threads that have no Claude Code chat behind them (helpers, Codex) start a new chat instead, with the old thread given to Claude as background.
 - **Save as note** keeps the conversation as a Markdown note (saving again updates it).
 
 ## Write

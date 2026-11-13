@@ -77,6 +77,11 @@ async function listProjects() {
     for (const f of files) updated = Math.max(updated, (await fsp.stat(path.join(dir, f)).catch(() => ({ mtimeMs: 0 }))).mtimeMs);
     all.push({ cwd, chats: files.length, updated });
   }
+  for (const t of t3Projects()) {
+    const hit = all.find((p) => p.cwd === t.cwd);
+    if (hit) hit.updated = Math.max(hit.updated, ms(t.updated));
+    else all.push({ cwd: t.cwd, chats: t.n, updated: ms(t.updated) });
+  }
   const home = os.homedir();
   const segs = (p) => p.split('/').filter(Boolean);
   all.sort((a, b) => {
@@ -92,6 +97,137 @@ async function listProjects() {
     exists: fs.existsSync(p.cwd),
     isHome: p.cwd === home,
   }));
+}
+
+// ---------- T3 Code threads ----------
+// T3 Code (a desktop app for coding agents) keeps its own threads in ~/.t3/userdata/statev2.sqlite. Read-only: threads
+// backed by a Claude Code chat on disk are shown once (T3's title, the Claude chat's content, so Continue works);
+// T3-only threads (helpers, Codex, …) are read from T3's database. If T3 changes its format, they simply don't show.
+const T3_DB = () => path.join(os.homedir(), '.t3', 'userdata', 'statev2.sqlite');
+let t3Copy = null; // { key, file } — fallback copy when the live database can't be opened read-only
+function t3Open() {
+  const file = T3_DB();
+  if (!fs.existsSync(file)) return null;
+  const { DatabaseSync } = require('node:sqlite');
+  try {
+    return new DatabaseSync(file, { readOnly: true });
+  } catch {
+    const st = fs.statSync(file);
+    const wal = fs.existsSync(file + '-wal') ? fs.statSync(file + '-wal').mtimeMs : 0;
+    const key = `${st.mtimeMs}:${wal}`;
+    if (t3Copy?.key !== key) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibenote-t3-'));
+      const copy = path.join(dir, 'state.sqlite');
+      fs.copyFileSync(file, copy);
+      if (wal) fs.copyFileSync(file + '-wal', copy + '-wal');
+      if (t3Copy) fs.rmSync(path.dirname(t3Copy.file), { recursive: true, force: true });
+      t3Copy = { key, file: copy };
+    }
+    return new DatabaseSync(t3Copy.file, { readOnly: true });
+  }
+}
+function t3Query(fn) {
+  let db = null;
+  try {
+    db = t3Open();
+    return db ? fn(db) : null;
+  } catch (e) {
+    console.warn('T3 Code threads unavailable:', e.message);
+    return null;
+  } finally {
+    try { db?.close(); } catch {}
+  }
+}
+const pj = (s) => { try { return JSON.parse(s); } catch { return {}; } };
+const ms = (s) => (s ? Date.parse(s) : 0);
+
+// T3 projects (folder → open thread count).
+function t3Projects() {
+  return t3Query((db) => db.prepare(`
+    select p.workspace_root as cwd, count(t.thread_id) as n, max(t.updated_at) as updated
+    from projection_projects p join orchestration_v2_projection_threads t on t.project_id = p.project_id
+    where p.deleted_at is null and t.deleted_at is null group by p.project_id`).all()) || [];
+}
+
+// T3 threads of a folder, with the Claude Code chats behind them.
+function t3Threads(projectCwd, subs) {
+  return t3Query((db) => {
+    const rows = db.prepare(`
+      select t.thread_id, t.title, t.default_provider, t.created_at, t.updated_at, t.archived_at, t.payload_json, p.workspace_root
+      from orchestration_v2_projection_threads t join projection_projects p on p.project_id = t.project_id
+      where t.deleted_at is null and p.deleted_at is null`).all()
+      .filter((r) => r.workspace_root === projectCwd || (subs && r.workspace_root.startsWith(projectCwd + '/')));
+    const natives = new Map(); // thread → [claude session ids]
+    for (const r of db.prepare(`select thread_id, provider, payload_json from orchestration_v2_projection_provider_threads`).all()) {
+      const id = pj(r.payload_json).nativeThreadRef?.nativeId;
+      if (r.provider === 'claudeAgent' && id && ID_RE.test(id)) (natives.get(r.thread_id) || natives.set(r.thread_id, []).get(r.thread_id)).push(id);
+    }
+    const counts = new Map(db.prepare(`select thread_id, count(*) as n from orchestration_v2_projection_messages group by thread_id`).all().map((r) => [r.thread_id, r.n]));
+    const titles = new Map(rows.map((r) => [r.thread_id.split(':').pop(), r.title]));
+    return rows.map((r) => {
+      const p = pj(r.payload_json);
+      const parent = p.lineage?.relationshipToParent === 'subagent' ? titles.get(String(p.lineage.parentThreadId)) || 'another thread' : '';
+      return {
+        threadId: r.thread_id,
+        title: r.title,
+        provider: r.default_provider,
+        cwd: r.workspace_root,
+        started: ms(r.created_at),
+        updated: ms(r.updated_at),
+        archived: !!r.archived_at,
+        branch: p.branch || '',
+        messages: counts.get(r.thread_id) || 0,
+        helperOf: parent,
+        claudeIds: natives.get(r.thread_id) || [],
+      };
+    });
+  }) || [];
+}
+
+// A T3-only thread as panel items.
+function t3Read(threadId) {
+  const out = t3Query((db) => {
+    const t = db.prepare(`select t.title, t.default_provider, t.created_at, t.updated_at, t.payload_json, p.workspace_root
+      from orchestration_v2_projection_threads t join projection_projects p on p.project_id = t.project_id where t.thread_id = ?`).get(threadId);
+    if (!t) return null;
+    const items = [];
+    for (const r of db.prepare(`select type, payload_json from orchestration_v2_projection_turn_items where thread_id = ? order by ordinal`).all(threadId)) {
+      const j = pj(r.payload_json);
+      const at = ms(j.startedAt || j.updatedAt);
+      const tool = (name, input, isError = false) => items.push({ kind: 'tool', name, input, done: true, isError, at });
+      switch (r.type) {
+        case 'user_message': if (j.text?.trim()) items.push({ kind: 'user', text: j.text, at }); break;
+        case 'assistant_message': {
+          if (!j.text?.trim()) break;
+          const last = items[items.length - 1];
+          if (last?.kind === 'text' && last.msgId && last.msgId === j.messageId) last.text = j.text;
+          else items.push({ kind: 'text', text: j.text, msgId: j.messageId, at });
+          break;
+        }
+        case 'command_execution': tool('Bash', { command: j.input || '' }, j.exitCode != null && j.exitCode !== 0); break;
+        case 'file_change': tool('Edit', { file_path: j.fileName || '' }); break;
+        case 'dynamic_tool': tool(j.toolName || 'Tool', j.input && typeof j.input === 'object' ? j.input : {}); break;
+        case 'web_search': tool('WebSearch', { query: (j.patterns || []).join(', ') }); break;
+        case 'subagent': tool('Agent', { description: String(j.progress || j.prompt || '').split('\n')[0].slice(0, 120) }); break;
+        case 'compaction': items.push({ kind: 'note', text: 'Earlier part of the conversation was summarised to save space', at }); break;
+        case 'handoff': items.push({ kind: 'note', text: 'Handed over to another session', at }); break;
+        case 'error': items.push({ kind: 'note', text: `Error: ${String(j.failure?.message || j.failure?.reason || 'something went wrong').slice(0, 200)}`, at }); break;
+        default: break;
+      }
+    }
+    for (const it of items) delete it.msgId;
+    return { t, items };
+  });
+  if (!out) throw new Error('That T3 Code thread no longer exists.');
+  const { t, items } = out;
+  const p = pj(t.payload_json);
+  return {
+    meta: {
+      id: `t3:${threadId}`, source: 't3', provider: t.default_provider, title: t.title, cwd: t.workspace_root,
+      branch: p.branch || '', started: ms(t.created_at), updated: ms(t.updated_at), entrypoint: 't3',
+    },
+    items,
+  };
 }
 
 // ---------- one project's chats ----------
@@ -158,10 +294,27 @@ async function listChats(projectCwd, subs = true) {
     try {
       const m = await chatMeta(f);
       if (m.size < 200 || (!m.first && m.title === 'Untitled chat')) continue; // empty / aborted sessions
-      metas.push({ ...m, sub: m.cwd && m.cwd !== projectCwd ? path.relative(projectCwd, m.cwd) : '' });
+      metas.push({ ...m, source: 'claude', sub: m.cwd && m.cwd !== projectCwd ? path.relative(projectCwd, m.cwd) : '' });
     } catch {}
   }
-  return metas.sort((a, b) => b.updated - a.updated);
+  // T3 Code threads: one entry each. Backed by Claude Code chats on disk → that chat (newest), with T3's title.
+  const byId = new Map(metas.map((m) => [m.id, m]));
+  const hidden = new Set();
+  for (const t of t3Threads(projectCwd, subs)) {
+    const sub = t.cwd !== projectCwd ? path.relative(projectCwd, t.cwd) : '';
+    const backing = t.claudeIds.map((id) => byId.get(id)).filter(Boolean).sort((a, b) => b.updated - a.updated);
+    if (backing.length) {
+      const m = backing[0];
+      Object.assign(m, { title: t.title || m.title, t3: true, helperOf: t.helperOf, updated: Math.max(m.updated, t.updated), archived: t.archived });
+      backing.slice(1).forEach((b) => hidden.add(b.id));
+    } else if (t.messages) {
+      metas.push({
+        id: `t3:${t.threadId}`, source: 't3', t3: true, provider: t.provider, title: t.title, first: '', cwd: t.cwd, sub,
+        branch: t.branch, entrypoint: 't3', started: t.started, updated: t.updated, helperOf: t.helperOf, archived: t.archived, size: 0,
+      });
+    }
+  }
+  return metas.filter((m) => !hidden.has(m.id)).sort((a, b) => b.updated - a.updated);
 }
 
 async function findChat(projectCwd, id) {
@@ -174,6 +327,7 @@ async function findChat(projectCwd, id) {
 // ---------- reading one chat ----------
 /** The conversation as panel items: { kind: 'user'|'text'|'tool'|'note', text, name, input, done, isError, at }. */
 async function readChat(projectCwd, id) {
+  if (String(id).startsWith('t3:')) return t3Read(String(id).slice(3));
   const file = await findChat(projectCwd, id);
   const meta = await chatMeta(file);
   const entries = new Map(); // uuid → entry (user/assistant messages of the main conversation)
@@ -265,8 +419,10 @@ function toMarkdown({ meta, items }, projectCwd) {
   const when = meta.started && meta.updated && fmtDay(meta.started) !== fmtDay(meta.updated)
     ? `${fmtDay(meta.started)} – ${fmtDay(meta.updated)}` : fmtDay(meta.updated || meta.started);
   const asked = items.filter((i) => i.kind === 'user').length;
-  out.push(`> Claude Code chat · **${path.basename(projectCwd)}**${meta.sub ? ` / ${meta.sub}` : ''}${meta.branch ? ` · branch \`${meta.branch}\`` : ''} · ${when} · ${asked} message${asked === 1 ? '' : 's'} from you`);
-  out.push(`> Continue it in VibeNote's Claude panel (Claude Chats window), or in Terminal: \`claude --resume ${meta.id}\``);
+  out.push(`> ${meta.source === 't3' ? 'T3 Code thread' : 'Claude Code chat'} · **${path.basename(projectCwd)}**${meta.sub ? ` / ${meta.sub}` : ''}${meta.branch ? ` · branch \`${meta.branch}\`` : ''} · ${when} · ${asked} message${asked === 1 ? '' : 's'} from you`);
+  out.push(meta.source === 't3'
+    ? `> From T3 Code${meta.provider && meta.provider !== 'claudeAgent' ? ` (${meta.provider})` : ''} · continue it in T3 Code, or in VibeNote's Claude panel with this conversation as background`
+    : `> Continue it in VibeNote's Claude panel (Claude Chats window), or in Terminal: \`claude --resume ${meta.id}\``);
   let pendingTools = [];
   const flushTools = () => {
     if (!pendingTools.length) return;
@@ -294,4 +450,16 @@ function toMarkdown({ meta, items }, projectCwd) {
   return out.join('\n\n') + '\n';
 }
 
-module.exports = { listProjects, listChats, readChat, toMarkdown, findChat };
+// Plain-text version of a conversation, to give Claude as background when a chat can't be resumed (T3-only threads).
+function asBackground({ meta, items }, max = 60000) {
+  const parts = [];
+  for (const it of items) {
+    if (it.kind === 'user') parts.push(`USER: ${it.text}`);
+    else if (it.kind === 'text') parts.push(`ASSISTANT: ${it.text}`);
+  }
+  let text = parts.join('\n\n');
+  if (text.length > max) text = '[…earlier part left out…]\n\n' + text.slice(text.length - max);
+  return `<previous-conversation source="${meta.source === 't3' ? 'T3 Code' : 'Claude Code'}" title=${JSON.stringify(meta.title)}>\n${text}\n</previous-conversation>`;
+}
+
+module.exports = { listProjects, listChats, readChat, toMarkdown, findChat, asBackground };

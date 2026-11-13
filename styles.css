@@ -683,3 +683,5 @@ body.api-note #status-pick, body.api-note #tag-list, body.api-note #tag-input, b
 .chats-tools li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chats-tools li.err { color: #dc2626; }
 .chats-more { height: 1px; }
+.chats-src.t3 { color: #0891b2; font-weight: 600; }
+.chats-helper { color: var(--faint); font-style: italic; overflow: hidden; text-overflow: ellipsis; }

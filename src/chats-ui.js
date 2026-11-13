@@ -2,7 +2,8 @@
 // read one as a clean conversation, continue it in the Claude panel, or save it as a note.
 import { renderMarkdown } from './markdown.js';
 
-const SOURCE = { cli: 'Terminal', 'claude-vscode': 'VS Code', 'sdk-ts': 'App', 'sdk-py': 'App', 'sdk-cli': 'Script' };
+const SOURCE = { cli: 'Terminal', 'claude-vscode': 'VS Code', 'sdk-ts': 'App', 'sdk-py': 'App', 'sdk-cli': 'Script', t3: 'T3 Code' };
+const sourceOf = (c) => (c.t3 ? `T3 Code${c.provider && c.provider !== 'claudeAgent' ? ` · ${c.provider === 'codex' ? 'Codex' : c.provider}` : ''}` : SOURCE[c.entrypoint] || '');
 const TOOL_VERB = {
   Read: 'Read', Write: 'Wrote', Edit: 'Edited', MultiEdit: 'Edited', NotebookEdit: 'Edited', Bash: 'Ran',
   Grep: 'Searched', Glob: 'Listed', WebFetch: 'Fetched', WebSearch: 'Searched the web', TodoWrite: 'Updated to-dos',
@@ -56,7 +57,7 @@ export function createChatsUI(ctx) {
         return;
       }
       for (const p of projects) {
-        const o = new Option(`${'   '.repeat(p.depth)}${p.label}  (${p.chats})${p.notebook ? `  · notebook ${p.notebook}` : ''}`, p.cwd);
+        const o = new Option(`${'   '.repeat(p.depth)}${p.label}${p.notebook ? `  · notebook ${p.notebook}` : ''}`, p.cwd);
         sel.append(o);
       }
       let pick = r.current;
@@ -98,11 +99,12 @@ export function createChatsUI(ctx) {
         li.append(el('div', 'chats-title', c.title));
         const meta = el('div', 'chats-meta');
         meta.append(el('span', '', ago(c.updated)));
-        if (SOURCE[c.entrypoint]) meta.append(el('span', 'chats-src', SOURCE[c.entrypoint]));
+        if (sourceOf(c)) meta.append(el('span', 'chats-src' + (c.t3 ? ' t3' : ''), sourceOf(c)));
+        if (c.helperOf) meta.append(el('span', 'chats-helper', `helper of ${c.helperOf}`));
         if (c.branch && c.branch !== 'HEAD') meta.append(el('span', 'chats-branch', c.branch));
         if (c.sub) meta.append(el('span', 'badge', c.sub));
         li.append(meta);
-        li.title = c.first;
+        li.title = c.first || c.title;
         li.addEventListener('click', () => show(c.id));
         list.append(li);
       }
@@ -124,16 +126,18 @@ export function createChatsUI(ctx) {
       }
       if (openId !== id) return;
       const { meta, items } = chat;
+      const listed = chats.find((c) => c.id === id) || {};
       main.textContent = '';
       const head = el('div', 'chats-chat-head');
-      head.append(el('h3', '', meta.title));
+      head.append(el('h3', '', listed.title || meta.title));
       const asked = items.filter((i) => i.kind === 'user').length;
       const info = [
         new Date(meta.started).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }),
         `${asked} message${asked === 1 ? '' : 's'} from you`,
         meta.branch && meta.branch !== 'HEAD' ? `branch ${meta.branch}` : '',
         meta.sub ? `in ${meta.sub}` : '',
-        SOURCE[meta.entrypoint] ? `from ${SOURCE[meta.entrypoint]}` : '',
+        sourceOf({ ...meta, ...listed }) ? `from ${sourceOf({ ...meta, ...listed })}` : '',
+        listed.helperOf ? `helper of “${listed.helperOf}”` : '',
       ].filter(Boolean).join(' · ');
       head.append(el('div', 'chats-info', info));
       const acts = el('div', 'chats-actions');
@@ -143,7 +147,10 @@ export function createChatsUI(ctx) {
       save.title = 'Save the conversation as a Markdown note (updates it if saved before)';
       const copy = el('button', 'btn', 'Copy Terminal command');
       copy.title = 'claude --resume, to continue it in Terminal';
-      acts.append(cont, save, copy);
+      if (meta.source === 't3') {
+        cont.title = 'There is no Claude Code chat behind this T3 thread, so this starts a new chat in the Claude panel and gives Claude this conversation as background with your first message.';
+        acts.append(cont, save);
+      } else acts.append(cont, save, copy);
       head.append(acts);
       main.append(head);
 
@@ -202,7 +209,7 @@ export function createChatsUI(ctx) {
           }
           closeOverlay();
           await afterContinue(r.key);
-          toast(`Continuing “${meta.title}” in the Claude panel`, 4000);
+          toast(r.background ? `New chat with “${listed.title || meta.title}” as background — type your first message` : `Continuing “${listed.title || meta.title}” in the Claude panel`, 4500);
         } catch (e) {
           cont.disabled = false;
           toast(errText(e), 5000);

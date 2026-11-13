@@ -78,7 +78,7 @@ The notes folder is self-contained, so it can be synced between Macs (iCloud Dri
 |---|---|
 | `main.js` | Electron main process: windows, menus, all file access (notes, trash, history, export, link titles) |
 | `themes.js` | Finds / loads / imports VS Code colour themes; “Same as VS Code” |
-| `claude-chats.js` | Reads (never changes) past Claude Code chats in `~/.claude/projects` for the Claude Chats window |
+| `claude-chats.js` | Reads (never changes) past Claude Code chats in `~/.claude/projects` and T3 Code threads (`~/.t3/userdata/statev2.sqlite`) for the Claude Chats window |
 | `preload.js` | The only bridge between UI and main (`window.vibe.*`) |
 | `src/renderer.js` | UI: sidebar, note list, toolbar, palette, settings, history, commands |
 | `src/editor.js` | CodeMirror setup: autocomplete, paste/drop, ⌘-click links |

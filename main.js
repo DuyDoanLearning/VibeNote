@@ -857,9 +857,10 @@ function readChat(key) {
   try { return JSON.parse(fs.readFileSync(chatFile(key), 'utf8')); } catch { return { sessionId: null, items: [] }; }
 }
 // cwd: set when continuing a chat that was started in a sub-folder of the project. fork: continue a copy (until it starts).
+// background: an earlier conversation (e.g. a T3 Code thread) handed to Claude with the first message of a new chat.
 function writeChat(key, data) {
   fs.mkdirSync(chatsDir(), { recursive: true });
-  fs.writeFileSync(chatFile(key), JSON.stringify({ sessionId: data.sessionId, cwd: data.cwd || undefined, fork: data.fork || undefined, items: data.items.slice(-400) }, null, 1));
+  fs.writeFileSync(chatFile(key), JSON.stringify({ sessionId: data.sessionId, cwd: data.cwd || undefined, fork: data.fork || undefined, background: data.background || undefined, items: data.items.slice(-400) }, null, 1));
 }
 
 function projectFor(notebook) {
@@ -928,7 +929,7 @@ async function ensureChat(wc, key, project) {
   // A continued chat runs in the folder it was started in (Claude Code finds chats by folder) — if that's inside the project.
   const cwd = saved.cwd && project.repo && (saved.cwd === project.repo || saved.cwd.startsWith(project.repo + path.sep)) && fs.existsSync(saved.cwd)
     ? saved.cwd : project.repo || rootDir();
-  state = { key, wc, items: saved.items || [], sessionId: saved.sessionId || null, cwd: cwd === (project.repo || rootDir()) ? undefined : cwd, fork: !!saved.fork };
+  state = { key, wc, items: saved.items || [], sessionId: saved.sessionId || null, cwd: cwd === (project.repo || rootDir()) ? undefined : cwd, fork: !!saved.fork, background: saved.background };
   state.chat = new mod.AgentChat({
     cwd,
     fork: state.fork,
@@ -1028,7 +1029,9 @@ ipcMain.handle('agent:send', async (e, { notebook, text, notePath, noteTitle }) 
     ? `<vibenote-context>\nThe user is viewing the note "${noteTitle}" — ${notePath}\n</vibenote-context>\n\n`
     : '';
   state.items.push({ kind: 'user', text });
-  state.chat.send(context + text);
+  const background = state.background ? `${state.background}\n\nThe conversation above happened earlier (in another app); continue from it.\n\n` : '';
+  state.background = undefined;
+  state.chat.send(background + context + text);
   return { key: project.key };
 });
 
@@ -1066,7 +1069,8 @@ ipcMain.handle('chats:read', (_e, cwd, id) => claudeChats.readChat(String(cwd), 
 
 // Continue a past chat in the Claude panel of the notebook linked to its folder (linking one if needed).
 ipcMain.handle('chats:continue', async (_e, { cwd, id, createNotebook }) => {
-  const { meta, items } = await claudeChats.readChat(String(cwd), String(id));
+  const chat = await claudeChats.readChat(String(cwd), String(id));
+  const { meta, items } = chat;
   const folder = meta.cwd || cwd;
   if (!fs.existsSync(folder)) throw new Error(`The folder this chat ran in no longer exists:\n${folder}`);
   let key = linkedNotebookFor(folder);
@@ -1080,6 +1084,16 @@ ipcMain.handle('chats:continue', async (_e, { cwd, id, createNotebook }) => {
   const st = chats.get(key);
   if (st) { st.chat.close(); chats.delete(key); }
   const repo = config.projects[key];
+  if (meta.source === 't3') {
+    // No Claude Code chat behind it: start a new chat that gets this conversation as background.
+    writeChat(key, {
+      sessionId: null,
+      cwd: folder !== repo ? folder : undefined,
+      background: claudeChats.asBackground(chat),
+      items: [...items.filter((i) => i.kind !== 'note').map(({ at, ...i }) => i), { kind: 'note', text: 'Continuing from a T3 Code thread — Claude gets this conversation as background with your first message' }],
+    });
+    return { key, background: true };
+  }
   writeChat(key, {
     sessionId: meta.id,
     fork: true,
@@ -1101,7 +1115,7 @@ ipcMain.handle('chats:export', async (_e, { cwd, id }) => {
   for (const [f] of all) {
     if (!f.endsWith('.md')) continue;
     const head = await headOf(f);
-    if (head.includes(`claude-session: ${meta.id}`)) { file = f; break; }
+    if (head.includes(`${meta.source === 't3' ? 't3-thread' : 'claude-session'}: ${meta.id.replace(/^t3:/, '')}`)) { file = f; break; }
   }
   const title = `Chat - ${meta.title}`.slice(0, 120);
   const body = claudeChats.toMarkdown(chat, cwd);
@@ -1109,7 +1123,7 @@ ipcMain.handle('chats:export', async (_e, { cwd, id }) => {
     title,
     tags: ['claude-chat'],
     created: new Date(meta.started || Date.now()).toISOString().slice(0, 10),
-    extra: `claude-session: ${meta.id}\nclaude-folder: ${JSON.stringify(meta.cwd || cwd)}`,
+    extra: `${meta.source === 't3' ? 't3-thread' : 'claude-session'}: ${meta.id.replace(/^t3:/, '')}\nclaude-folder: ${JSON.stringify(meta.cwd || cwd)}`,
   };
   if (file) {
     await snapshot(file, true, 'Before chat update').catch(() => {});
