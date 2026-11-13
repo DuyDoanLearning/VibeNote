@@ -30,6 +30,13 @@
           </button>
         </div>
         <div id="confluence"></div>
+        <div class="section-head">
+          <span>APIs</span>
+          <button id="api-add" class="mini" title="New API spec (⌥⌘N)">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+        <div id="apis"></div>
         <div class="section-head"><span>Status</span></div>
         <div id="statuses"></div>
         <div class="section-head"><span>Tags</span></div>
@@ -129,6 +136,7 @@
         <input id="tag-input" list="tag-options" placeholder="+ Add tag" spellcheck="false">
         <datalist id="tag-options"></datalist>
       </div>
+      <div id="backlinks" hidden></div>
       <div id="panes" class="split">
         <div id="editor"></div>
         <article id="preview" class="markdown"></article>

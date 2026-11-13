@@ -10,6 +10,7 @@ import { createComments } from './comments.js';
 import { setupResizers } from './resize.js';
 import { createWriter } from './writer.js';
 import { createApiDocs } from './apidocs.js';
+import { splitTarget, parseOperation, apiOperations, embeddedSpecs, mdHeadings, linksTo } from './links.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
 import { moveLineUp, moveLineDown, copyLineDown, deleteLine } from '@codemirror/commands';
 
@@ -40,6 +41,7 @@ const ICON = {
   pin: '<svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3zM12 15v6"/></svg>',
   note: '<svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5"/></svg>',
   cmd: '<svg viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 17h7"/></svg>',
+  api: '<svg viewBox="0 0 24 24"><path d="M8 6l-5 6 5 6M16 6l5 6-5 6M14 4l-4 16"/></svg>',
   cloud: '<svg viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 00.6-7.95A6 6 0 006.2 9.5 4.3 4.3 0 007 18z"/></svg>',
 };
 
@@ -90,6 +92,17 @@ function startsWithTitle(body, title) {
   return /^#\s/.test(first) && first.replace(/^#+\s+/, '').trim() === title;
 }
 
+const API_ROOT = 'APIs'; // top-level notebook for API specs (own sidebar section)
+const kindOf = (n) => (n.kind === 'api' ? 'api' : confluenceInfo(n.meta) ? 'confluence' : 'note');
+const hasSpec = (n) => n.kind === 'api' || /```(?:ya?ml|json)[^\n]*\n[\s\S]{0,600}?^\s*["']?(?:openapi|swagger)["']?\s*:/m.test(n.body);
+// [[Title#frag]] → { note, frag }. A title may itself contain '#', so try the whole thing first.
+function findByTarget(target) {
+  const whole = findByTitle(target);
+  if (whole) return { note: whole, frag: '' };
+  const { title, frag } = splitTarget(target);
+  return { note: findByTitle(title), frag };
+}
+
 function findByTitle(t) {
   const q = t.trim().toLowerCase();
   const l = live();
@@ -119,11 +132,23 @@ const editor = createEditor({
     const safe = title.replace(/([\[\]])/g, '\\$1');
     editor.replaceNear(pos, url, `[${safe}](${url})`);
   },
-  getTitles: () => [...new Set(live().filter((n) => n.path !== S.current).map((n) => n.title))],
+  getTitles: () => {
+    const seen = new Set();
+    return live().filter((n) => n.path !== S.current && !seen.has(n.title) && seen.add(n.title)).map((n) => ({ title: n.title, kind: kindOf(n) }));
+  },
+  // After [[Title# : endpoints of an API spec (also specs inside notes) and headings of a note
+  getFragments: (title) => {
+    const n = findByTitle(title);
+    if (!n) return [];
+    const ops = (n.kind === 'api' ? [n.body] : embeddedSpecs(n.body)).flatMap(apiOperations)
+      .map((o) => ({ label: `${o.method} ${o.path}`, detail: o.summary, type: 'function' }));
+    const hs = n.kind === 'api' ? [] : mdHeadings(n.body).map((h) => ({ label: h.text, detail: 'H' + h.level, type: 'text' }));
+    return [...ops, ...hs];
+  },
   onSelection: () => comments?.selectionChanged(),
   onCommentClick: (id) => comments?.commentClicked(id),
 });
-setLinkResolver((title) => !!findByTitle(title));
+setLinkResolver((target) => { const { note } = findByTarget(target); return note ? kindOf(note) : null; });
 const apiDocs = createApiDocs({ api, container: $('#apidocs'), onJump: (line) => editor.gotoLine(line) });
 
 // ---------- saving ----------
@@ -223,7 +248,7 @@ async function refresh() {
 function validateFilter() {
   const f = S.filter;
   const ok =
-    ['all', 'inbox', 'trash'].includes(f.type) ||
+    ['all', 'inbox', 'trash', 'api'].includes(f.type) ||
     (f.type === 'notebook' && S.notebooks.includes(f.name)) ||
     (f.type === 'status' && STATUS[f.name]) ||
     (f.type === 'tag' && live().some((n) => n.meta.tags.includes(f.name)));
@@ -291,7 +316,7 @@ function closeNote() {
 
 async function newNote(title, kind) {
   const f = S.filter;
-  const nb = f.type === 'notebook' ? f.name : SINGLE && currentNote() ? currentNote().notebook : '';
+  const nb = f.type === 'notebook' ? f.name : SINGLE && currentNote() ? currentNote().notebook : kind === 'api' ? API_ROOT : '';
   await leaveCurrent();
   if (f.type === 'trash') setFilter({ type: 'all' });
   try {
@@ -311,13 +336,35 @@ async function newNote(title, kind) {
   }
 }
 
-async function openByTitle(title) {
-  const n = findByTitle(title);
+async function openByTitle(target) {
+  const { note: n, frag } = findByTarget(target);
   if (n) {
     if (!visibleNotes().includes(n)) setFilter({ type: 'all' });
-    return openNote(n.path);
+    await openNote(n.path);
+    if (frag) jumpTo(n, frag);
+    return;
   }
+  const title = splitTarget(target).title;
   if (confirm(`There's no note called “${title}”. Create it?`)) newNote(title);
+}
+
+// Go to "#fragment" inside the open note: an endpoint of an API spec, an endpoint of a spec inside the note, or a heading.
+async function jumpTo(n, frag) {
+  const op = parseOperation(frag);
+  if (n.kind === 'api') {
+    if (S.mode === 'edit') setMode('split');
+    await renderPreview(true);
+    if (op && !(await apiDocs.focus(frag))) toast(`No “${frag}” endpoint in this spec.`);
+    return;
+  }
+  if (op) {
+    const spec = embeddedSpecs(editor.text()).find((t) => apiOperations(t).some((o) => o.method.toLowerCase() === op.method && o.path === op.path));
+    if (spec) { window.dispatchEvent(new CustomEvent('vibe:api-docs', { detail: { text: spec, focus: frag } })); return; }
+  }
+  const norm = (s) => s.toLowerCase().replace(/[*_`]/g, '').trim();
+  const h = headings().find((x) => norm(x.text) === norm(frag));
+  if (h) { if (S.mode === 'edit') editor.gotoLine(h.line); else { await renderPreview(true); gotoHeading(h); } }
+  else toast(`No heading “${frag}” in this note.`);
 }
 
 async function moveNote(p, nb) {
@@ -549,6 +596,7 @@ function visibleNotes() {
     else {
       if (n.trashed) return false;
       if (f.type === 'inbox' && n.notebook) return false;
+      if (f.type === 'api' && !hasSpec(n)) return false;
       if (f.type === 'notebook' && !inBook(n, f.name)) return false;
       if (f.type === 'tag' && !n.meta.tags.includes(f.name)) return false;
       if (f.type === 'status' && n.meta.status !== f.name) return false;
@@ -674,7 +722,7 @@ function renderSidebar() {
   const wrap = $('#notebooks');
   wrap.textContent = '';
   const tree = (parent, depth, target = wrap) => {
-    for (const nb of S.notebooks.filter((x) => parentOf(x) === parent && x !== CONFLUENCE_ROOT)) {
+    for (const nb of S.notebooks.filter((x) => parentOf(x) === parent && x !== CONFLUENCE_ROOT && x !== API_ROOT)) {
       const kids = S.notebooks.some((x) => parentOf(x) === nb);
       const open = S.expanded.has(nb);
       const row = sideRow({
@@ -696,7 +744,30 @@ function renderSidebar() {
     }
   };
   tree('', 0);
-  if (!S.notebooks.some((x) => x !== CONFLUENCE_ROOT)) wrap.append(el('div', 'hint', 'Notebooks are folders. Click + to add one.'));
+  if (!S.notebooks.some((x) => x !== CONFLUENCE_ROOT && x !== API_ROOT)) wrap.append(el('div', 'hint', 'Notebooks are folders. Click + to add one.'));
+
+  // API specs: every spec file + notes that contain one, and the "APIs" notebook.
+  const apiBox = $('#apis');
+  apiBox.textContent = '';
+  const specCount = notes.filter(hasSpec).length;
+  if (specCount || S.notebooks.includes(API_ROOT)) {
+    apiBox.append(sideRow({
+      icon: ICON.api, label: 'All API specs', count: specCount,
+      active: f.type === 'api', onClick: () => setFilter({ type: 'api' }),
+    }));
+    if (S.notebooks.includes(API_ROOT)) {
+      const row = sideRow({
+        icon: ICON.book, label: API_ROOT, count: notes.filter((n) => inBook(n, API_ROOT)).length,
+        active: f.type === 'notebook' && f.name === API_ROOT,
+        onClick: () => setFilter({ type: 'notebook', name: API_ROOT }), onMenu: () => notebookMenu(API_ROOT),
+      });
+      makeDropTarget(row, API_ROOT);
+      apiBox.append(row);
+      tree(API_ROOT, 1, apiBox);
+    }
+  } else {
+    apiBox.append(el('div', 'hint', 'Click + to create an API spec (Swagger / OpenAPI).'));
+  }
 
   // Pages fetched from Confluence live in the "Confluence" notebook, shown as their own section.
   const cfBox = $('#confluence');
@@ -748,7 +819,7 @@ function renderSidebar() {
 
 function filterLabel() {
   const f = S.filter;
-  return { all: 'All Notes', inbox: 'Inbox', trash: 'Trash' }[f.type]
+  return { all: 'All Notes', inbox: 'Inbox', trash: 'Trash', api: 'API specs' }[f.type]
     || (f.type === 'notebook' ? leafOf(f.name) : f.type === 'tag' ? `# ${f.name}` : STATUS[f.name]?.label || '');
 }
 
@@ -774,6 +845,7 @@ function renderList() {
 
     const head = el('div', 'note-title');
     if (n.kind === 'api') head.append(el('span', 'api-badge', 'API'));
+    else if (S.filter.type === 'api' && hasSpec(n)) { const b = el('span', 'api-badge in-note', 'API'); b.title = 'A note that contains an API spec'; head.append(b); }
     if (n.meta.pinned && !n.trashed) head.append(iconEl(ICON.pin, 'pin-ico'));
     head.append(el('span', '', n.title || 'Untitled'));
     li.append(head);
@@ -834,7 +906,28 @@ function renderToolbar() {
   $$('#modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === S.mode));
 }
 
+// "Linked from": notes, Confluence pages and specs that link here with [[…]] (or a Confluence page link).
+function renderBacklinks() {
+  const box = $('#backlinks');
+  const n = currentNote();
+  box.textContent = '';
+  if (!n || n.trashed) { box.hidden = true; return; }
+  const cf = confluenceInfo(n.meta);
+  const refs = live().filter((o) => o !== n && (linksTo(o.body, n.title, cf?.id) || (n.name !== n.title && linksTo(o.body, n.name))));
+  box.hidden = !refs.length;
+  if (!refs.length) return;
+  box.append(el('span', 'bl-label', `🔗 Linked from`));
+  for (const o of refs.slice(0, 12)) {
+    const b = el('button', `bl-chip kind-${kindOf(o)}`, o.title);
+    b.title = o.notebook ? `${o.notebook} / ${o.title}` : o.title;
+    b.addEventListener('click', () => { if (!visibleNotes().includes(o)) setFilter({ type: 'all' }); openNote(o.path); });
+    box.append(b);
+  }
+  if (refs.length > 12) box.append(el('span', 'bl-more', `+${refs.length - 12} more`));
+}
+
 function renderMeta() {
+  renderBacklinks();
   const m = S.meta;
   if (!m) return;
   const ti = $('#title-input');
@@ -1405,6 +1498,7 @@ function focusSearch() {
 function bindUI() {
   $('#add-notebook').addEventListener('click', () => newNotebook());
   $('#cf-fetch').addEventListener('click', () => confluence.openFetch());
+  $('#api-add').addEventListener('click', () => { setFilter({ type: 'notebook', name: API_ROOT }); newNote(undefined, 'api'); });
   $('#push-btn').addEventListener('click', () => confluence.push());
   $('#comments-btn').addEventListener('click', () => comments.toggle());
   $('#folder-btn').addEventListener('click', chooseFolder);
@@ -1464,6 +1558,11 @@ function bindUI() {
     if (!a) return;
     const href = a.getAttribute('href') || '';
     if (href.startsWith('#note:')) { e.preventDefault(); openByTitle(decodeURIComponent(href.slice(6))); }
+    else if (/atlassian\.net\/wiki\//.test(href) && !e.metaKey) {
+      const id = /\/pages\/(\d+)/.exec(href)?.[1] || /[?&]pageId=(\d+)/.exec(href)?.[1];
+      const local = id && live().find((n) => confluenceInfo(n.meta)?.id === id);
+      if (local) { e.preventDefault(); if (!visibleNotes().includes(local)) setFilter({ type: 'all' }); openNote(local.path); }
+    }
     else if (href.startsWith('#')) {
       e.preventDefault();
       const target = href.length > 1 && $('#preview').querySelector(`[id="${CSS.escape(decodeURIComponent(href.slice(1)))}"]`);
@@ -1514,6 +1613,12 @@ function bindUI() {
 const confluence = createConfluenceUI({
   api, S, $, el, esc, overlay, closeOverlay, toast, save, refresh, setFilter, openNote, currentNote,
   editorText: () => editor.text(),
+  resolveLink: (target) => {
+    const { note, frag } = findByTarget(target);
+    const info = note && confluenceInfo(note.meta);
+    if (!info || info.kind !== 'page') return null;
+    return frag && !parseOperation(frag) ? `${info.url}#${frag.trim().replace(/\s+/g, '-')}` : info.url;
+  },
 });
 
 let refreshSoon = null;
@@ -1541,10 +1646,12 @@ const writer = createWriter({ api, S, $, el, editor, isTrashed, toast, isDark, d
 
 // ```yaml / ```json OpenAPI blocks in a note's preview get an "API docs" button → Swagger in a big window.
 window.addEventListener('vibe:api-docs', (e) => {
+  const { text, focus } = typeof e.detail === 'string' ? { text: e.detail } : e.detail;
   const ov = overlay('modal-ov');
   ov.innerHTML = '<div class="modal api-modal"><div class="api-modal-head"><h2>API docs</h2><span class="hint">From the code block in this note · Try it out works here too</span><div class="spacer"></div><button class="btn" data-act="close">Close</button></div><div class="api-modal-body"></div></div>';
   $('[data-act=close]', ov).addEventListener('click', closeOverlay);
-  createApiDocs({ api, container: $('.api-modal-body', ov) }).show('block:' + e.detail.length + ':' + e.detail.slice(0, 200), e.detail);
+  const docs = createApiDocs({ api, container: $('.api-modal-body', ov) });
+  docs.show('block:' + text.length + ':' + text.slice(0, 200), text).then(() => { if (focus) docs.focus(focus); });
 });
 
 (async function start() {

@@ -381,7 +381,13 @@ function restoreTable(orig, table, doc) {
 }
 
 // Markdown (a changed region of the note) → Confluence HTML.
-function convertRegion(text, side, replaced) {
+function convertRegion(text, side, replaced, opts = {}) {
+  // [[Title]] / [[Title#Heading|text]] → a link to the Confluence page when it is one, otherwise just the words.
+  text = text.replace(/\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/g, (_m, target, alias) => {
+    const label = (alias || target.replace(/\s*#\s*/, ' › ')).trim().replace(/[[\]]/g, '');
+    const url = opts.resolveLink?.(target.trim());
+    return url ? `[${label}](<${url}>)` : label;
+  });
   const html = md.parse(text);
   const doc = new DOMParser().parseFromString(`<!doctype html><body>${html}</body>`, 'text/html');
   const body = doc.body;
@@ -478,7 +484,7 @@ function convertRegion(text, side, replaced) {
  * side: the sidecar saved at fetch time ({ blocks: [{md, html}], kept }).
  * Returns { html, kept, changed, added, removed, problems, unchanged }.
  */
-export function toConfluence(markdown, side) {
+export function toConfluence(markdown, side, opts = {}) {
   const blocks = side.blocks.map((b, bi) => ({ ...b, bi, olds: [], kept: false }));
   const oldLines = [];
   blocks.forEach((b) => b.md.split('\n').forEach((l) => { if (l.trim()) { b.olds.push(oldLines.length); oldLines.push(l.trimEnd()); } }));
@@ -516,7 +522,7 @@ export function toConfluence(markdown, side) {
       for (const b of between) if (!b.md.trim()) out.push(b.html);
       return;
     }
-    const r = convertRegion(text, side, between.filter((b) => b.md.trim()).map((b) => b.html));
+    const r = convertRegion(text, side, between.filter((b) => b.md.trim()).map((b) => b.html), opts);
     out.push(r.html);
     problems.push(...r.problems);
     added++;

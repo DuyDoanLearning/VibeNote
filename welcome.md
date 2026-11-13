@@ -18,7 +18,8 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - Pin important notes with **⌥⌘P**
 - Search with filters: `tag:guide`, `book:Ideas`, `status:active`, `title:welcome`, `is:pinned`, `-tag:old`
 - The title lives in the big field above the editor; it's also the file name
-- Link notes with double brackets, like [[Welcome to VibeNote]]
+- Link notes with double brackets, like [[Welcome to VibeNote]] — also Confluence pages and API specs. Add `#` to go deeper: `[[Some note#A heading]]` or `[[My API#GET /users/{id}]]` (type `[[`, then `#`, to pick from a list)
+- A note shows **🔗 Linked from** when other notes link to it. Links to Confluence pages you've fetched open your local copy (⌘-click for the browser)
 
 ## Confluence
 
@@ -33,7 +34,7 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 
 ## API specs (Swagger / OpenAPI)
 
-- **⌥⌘N** creates an API spec (a `.yaml` file in your notes folder, marked **API** in the list). Edit the YAML on the left; the Swagger docs update on the right. Mistakes show as “Line N: …” — click to jump there.
+- **⌥⌘N** (or **+** next to **APIs** in the sidebar) creates an API spec (a `.yaml` file, marked **API** in the list). **All API specs** also lists notes and Confluence pages that contain one. Edit the YAML on the left; the Swagger docs update on the right. Mistakes show as “Line N: …” — click to jump there.
 - **Try it out → Execute** calls the real API from VibeNote (no browser CORS errors). Tokens entered under **Authorize** are forgotten when VibeNote closes.
 - A ` ```yaml ` OpenAPI block inside any note (e.g. a Confluence page) gets an **⚡ API docs** button in the preview.
 - **/claude** works in specs too: “add a POST /bookings endpoint with a 409 conflict response”.

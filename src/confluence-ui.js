@@ -9,7 +9,7 @@ const safeSeg = (t) => String(t).replace(/[\/\\:*?"<>|#\x00-\x1f]/g, '').replace
 const ICONS = { page: '📄', folder: '📁', whiteboard: '🧩', database: '🗃', embed: '🔗' };
 
 export function createConfluenceUI(ctx) {
-  const { api, S, $, el, esc, overlay, closeOverlay, toast, save, refresh, setFilter, openNote, currentNote, editorText } = ctx;
+  const { api, S, $, el, esc, overlay, closeOverlay, toast, save, refresh, setFilter, openNote, currentNote, editorText, resolveLink } = ctx;
   const cf = api.confluence;
 
   const pageUrl = (site, spaceKey, id, type = 'page') => {
@@ -237,7 +237,7 @@ export function createConfluenceUI(ctx) {
     const side = await cf.sidecar(info.id);
     if (!side) return toast('Fetch this page from Confluence again first — its original copy is missing.');
     let r;
-    try { r = toConfluence(editorText(), side); } catch (e) { return toast('Could not prepare the page: ' + errText(e)); }
+    try { r = toConfluence(editorText(), side, { resolveLink }); } catch (e) { return toast('Could not prepare the page: ' + errText(e)); }
     const title = S.meta.title || side.title;
     const titleChanged = title !== side.title;
     if (r.unchanged && !titleChanged) return toast('Nothing to push — this note is the same as in Confluence.');

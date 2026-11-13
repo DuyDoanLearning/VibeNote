@@ -5,8 +5,8 @@ import hljs from 'highlight.js/lib/common';
 import katex from 'katex';
 import markedFootnote from 'marked-footnote';
 
-let linkExists = () => true;
-export function setLinkResolver(fn) { linkExists = fn; }
+let linkKind = () => 'note'; // target → 'note' | 'confluence' | 'api' | null (missing)
+export function setLinkResolver(fn) { linkKind = fn; }
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -38,10 +38,11 @@ marked.use({
       start: (src) => { const i = src.indexOf('[['); return i < 0 ? undefined : i; },
       tokenizer(src) {
         const m = /^\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/.exec(src);
-        if (m) return { type: 'wikilink', raw: m[0], target: m[1].trim(), text: (m[2] || m[1]).trim() };
+        if (m) return { type: 'wikilink', raw: m[0], target: m[1].trim(), text: m[2] ? m[2].trim() : m[1].trim().replace(/\s*#\s*/, ' › ') };
       },
       renderer(tok) {
-        const cls = linkExists(tok.target) ? 'wikilink' : 'wikilink missing';
+        const kind = linkKind(tok.target);
+        const cls = kind ? `wikilink kind-${kind}` : 'wikilink missing';
         return `<a class="${cls}" href="#note:${encodeURIComponent(tok.target)}">${esc(tok.text)}</a>`;
       },
     },

@@ -88,3 +88,6 @@
 .markdown span[data-type="status"][data-color="purple"] { background: #f3f0ff; color: #5e4db2; }
 .markdown td ul, .markdown td ol { margin: 0; padding-left: 1.2em; }
 .markdown a[href="mention"] { color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 0 3px; text-decoration: none; pointer-events: none; }
+
+.markdown a.wikilink.kind-api::before { content: 'API'; font-size: .62em; font-weight: 800; letter-spacing: .03em; color: #fff; background: #49cc90; border-radius: 3px; padding: 0 3px; margin-right: 4px; vertical-align: .15em; }
+.markdown a.wikilink.kind-confluence::before { content: '☁ '; color: #0c66e4; }

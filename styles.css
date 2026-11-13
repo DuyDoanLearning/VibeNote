@@ -587,3 +587,15 @@ body.api-note #status-pick, body.api-note #tag-list, body.api-note #tag-input, b
 .api-modal-head h2 { margin: 0; }
 .api-modal-body { flex: 1; min-height: 0; overflow-y: auto; background: #fff; color: #3b4151; color-scheme: light; }
 .apidocs a[href^="https://spec.vibenote.local"] { display: none; } /* internal base address used for $ref resolution */
+
+/* ---------- links between notes, Confluence pages and API specs ---------- */
+#backlinks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 24px 8px 46px; font-size: 12px; }
+#backlinks[hidden] { display: none; }
+.bl-label { color: var(--faint); margin-right: 2px; }
+.bl-chip { border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 12px; padding: 1px 9px; font-size: 12px; cursor: pointer; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bl-chip:hover { border-color: var(--accent); color: var(--accent); }
+.bl-chip.kind-api::before { content: 'API '; font-size: 9px; font-weight: 800; color: #2f9e6e; }
+.bl-chip.kind-confluence::before { content: '☁ '; color: #0c66e4; }
+.bl-more { color: var(--faint); }
+.api-badge.in-note { background: none; color: #2f9e6e; border: 1px solid #49cc90; }
+.apidocs .opblock.vn-flash { box-shadow: 0 0 0 3px var(--accent); transition: box-shadow .3s; }

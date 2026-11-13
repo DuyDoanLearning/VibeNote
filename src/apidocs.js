@@ -151,5 +151,26 @@ export function createApiDocs({ api, container, onJump = () => {} }) {
     lastText = null;
   }
 
-  return { show, clear };
+  // Expand and scroll to an endpoint ("GET /pet/{id}"). Swagger renders asynchronously, so retry for a moment.
+  async function focus(frag) {
+    const m = /^\s*([a-z]+)\s+(\/\S*)\s*$/i.exec(frag || '');
+    if (!m) return false;
+    const method = m[1].toLowerCase();
+    for (let i = 0; i < 40; i++) {
+      await mounting;
+      const block = [...container.querySelectorAll(`.opblock.opblock-${method}`)].find((b) => b.querySelector('.opblock-summary-path')?.getAttribute('data-path') === m[2]);
+      if (block) {
+        if (!block.classList.contains('is-open')) (block.querySelector('.opblock-summary-control') || block.querySelector('.opblock-summary'))?.click();
+        // open its tag section if it was collapsed
+        setTimeout(() => block.scrollIntoView({ block: 'start', behavior: 'smooth' }), 120);
+        block.classList.add('vn-flash');
+        setTimeout(() => block.classList.remove('vn-flash'), 1600);
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return false;
+  }
+
+  return { show, clear, focus };
 }

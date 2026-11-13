@@ -99,7 +99,7 @@ const theme = EditorView.theme({
 const TASK_RE = /^((?:\s*>)*\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])\]/;
 const URL_RE = /^https?:\/\/[^\s<>"]+$/;
 
-export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClick, onPasteUrl, getTitles, onSelection, onCommentClick }) {
+export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClick, onPasteUrl, getTitles, getFragments = () => [], onSelection, onCommentClick }) {
   const comps = { vim: new Compartment(), gutter: new Compartment(), spell: new Compartment(), ro: new Compartment(), lang: new Compartment() };
   let lang = 'markdown'; // 'markdown' | 'yaml' | 'json' (API specs)
   const langExt = () => (lang === 'yaml' ? yaml() : lang === 'json' ? json() : [markdown({ base: markdownLanguage, codeLanguages: languages }), listMarkers, EditorView.lineWrapping]);
@@ -108,13 +108,34 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
   let silent = false;
 
   // [[ → suggest note titles
+  const KIND_LABEL = { api: 'API spec', confluence: 'Confluence', note: '' };
   const wikiComplete = (ctx) => {
     const m = ctx.matchBefore(/\[\[[^\]\n]*/);
     if (!m) return null;
+    const typed = m.text.slice(2);
+    const hash = typed.indexOf('#');
+    if (hash >= 0) {
+      // [[Title#…  → headings of a note, or endpoints of an API spec
+      const frags = getFragments(typed.slice(0, hash).trim());
+      return {
+        from: m.from + 2 + hash + 1,
+        options: frags.map((f) => ({
+          label: f.label,
+          detail: f.detail || '',
+          type: f.type || 'text',
+          apply: (view, _c, from, to) => {
+            const end = view.state.sliceDoc(to, to + 2) === ']]' ? to + 2 : to;
+            const insert = f.label + ']]';
+            view.dispatch({ changes: { from, to: end, insert }, selection: { anchor: from + insert.length } });
+          },
+        })),
+      };
+    }
     return {
       from: m.from + 2,
-      options: getTitles().map((title) => ({
+      options: getTitles().map(({ title, kind }) => ({
         label: title,
+        detail: KIND_LABEL[kind] || '',
         type: 'note',
         apply: (view, _c, from, to) => {
           const end = view.state.sliceDoc(to, to + 2) === ']]' ? to + 2 : to;
