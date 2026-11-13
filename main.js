@@ -906,6 +906,78 @@ ipcMain.handle('confluence:push', async (_e, { site, id, title, html, version, d
   return { ok: true, version: r?.version?.number || null };
 });
 
+// ---------- comments (highlight → comment → @Claude replies) ----------
+// Threads for a note live in <root>/.comments/<id>.json; the note's front matter holds `comments-id: <id>`.
+const commentsPath = (id) => {
+  const clean = String(id).replace(/[^a-z0-9]/gi, '');
+  if (!clean) throw new Error('Bad comments id');
+  return path.join(rootDir(), '.comments', `${clean}.json`);
+};
+ipcMain.handle('comments:read', async (_e, id) => {
+  try { return JSON.parse(await fsp.readFile(commentsPath(id), 'utf8')); } catch { return null; }
+});
+ipcMain.handle('comments:write', async (_e, id, data) => {
+  const f = commentsPath(id);
+  await fsp.mkdir(path.dirname(f), { recursive: true });
+  await fsp.writeFile(f, JSON.stringify(data, null, 1));
+});
+
+const COMMENT_SYSTEM = `You are Claude, answering a comment thread inside VibeNote, a Markdown notes app. The user highlighted part of a note and wrote a comment that mentions you.
+Reply like a helpful colleague in a doc comment: short, concrete, in the same language the user wrote in.
+If a change to the highlighted text would help (or the user asked for a fix), also give the full replacement for exactly the highlighted text, keeping its Markdown formatting and anything it should keep.
+Never change or reproduce \`\`\`confluence blocks (they are placeholders for content kept in Confluence), and keep [@Name](mention) links and HTML tags like <time> as they are.
+Answer in this format:
+<reply>your comment reply</reply>
+<suggestion>replacement for the highlighted text</suggestion>   (omit this tag entirely if no change is needed)`;
+
+ipcMain.handle('comments:ask', async (_e, { title, note, quote, thread }) => {
+  const mod = await loadAgent();
+  const env = await mod.loginShellEnv();
+  const claudePath = mod.findClaude(env, config.settings.agentClaudePath);
+  if (!claudePath) throw new Error('Claude Code was not found. Install it and run `claude` once to log in, or set its path in Settings.');
+  const clip = (s, n) => (s.length > n ? s.slice(0, n) + '\n…(truncated)' : s);
+  const prompt = [
+    `Note title: ${title}`,
+    `<note>\n${clip(note, 60000)}\n</note>`,
+    `<highlighted>\n${clip(quote, 8000)}\n</highlighted>`,
+    `<thread>\n${thread.map((m) => `${m.author === 'claude' ? 'Claude' : 'User'}: ${m.text}${m.suggestion ? `\n(Claude suggested replacing the highlight with: ${m.suggestion.text} — ${m.suggestion.status})` : ''}`).join('\n\n')}\n</thread>`,
+    'Reply to the last message in the thread.',
+  ].join('\n\n');
+  const out = await mod.askOnce({ prompt, system: COMMENT_SYSTEM, claudePath, env, model: config.settings.agentModel, cwd: rootDir() });
+  const reply = /<reply>([\s\S]*?)<\/reply>/.exec(out)?.[1].trim() ?? out.replace(/<suggestion>[\s\S]*?<\/suggestion>/, '').trim();
+  const sug = /<suggestion>\n?([\s\S]*?)\n?<\/suggestion>/.exec(out)?.[1];
+  return { reply, suggestion: sug != null && sug !== quote ? sug : null };
+});
+
+// Post a comment to Confluence: inline on the highlighted text when Confluence can find it, otherwise a page comment.
+ipcMain.handle('confluence:comment', async (_e, { site, id, text, quote, parentId }) => {
+  const atl = await loadAtlassian();
+  const body = text.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
+  if (parentId) {
+    const r = await atl.call('createConfluenceInlineComment', { cloudId: site, parentCommentId: String(parentId), body, contentFormat: 'html' })
+      .catch(() => atl.call('createConfluenceFooterComment', { cloudId: site, parentCommentId: String(parentId), body, contentFormat: 'html' }));
+    return { id: String(r?.id || ''), inline: true };
+  }
+  if (quote) {
+    const page = await atl.call('getConfluencePage', { cloudId: site, pageId: String(id), contentFormat: 'html' });
+    const plain = String(page.body || '').replace(/<[^>]+>/g, '')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&nbsp;/g, '\u00a0').replace(/&amp;/g, '&');
+    const count = plain.split(quote).length - 1;
+    if (count >= 1) {
+      try {
+        const r = await atl.call('createConfluenceInlineComment', {
+          cloudId: site, pageId: String(id), body, contentFormat: 'html',
+          inlineCommentProperties: { textSelection: quote, textSelectionMatchCount: count, textSelectionMatchIndex: 0 },
+        });
+        return { id: String(r?.id || ''), inline: true };
+      } catch {}
+    }
+  }
+  const quoted = quote ? `<blockquote><p>${esc(quote.slice(0, 500))}</p></blockquote>` : '';
+  const r = await atl.call('createConfluenceFooterComment', { cloudId: site, pageId: String(id), body: quoted + body, contentFormat: 'html' });
+  return { id: String(r?.id || ''), inline: false };
+});
+
 ipcMain.on('app:flushed', (e) => {
   const w = winOf(e);
   if (w && w.flushDone) w.flushDone();
@@ -1052,6 +1124,8 @@ function buildMenu() {
         { type: 'separator' },
         item('Copy Link to Note', 'copy-link', 'CmdOrCtrl+Alt+L'),
         item('Version History…', 'history', 'CmdOrCtrl+Alt+Y'),
+        { type: 'separator' },
+        item('Add Comment', 'add-comment', 'CmdOrCtrl+Alt+M'),
       ],
     },
     {
@@ -1079,6 +1153,7 @@ function buildMenu() {
         item('Toggle Sidebar', 'toggle-sidebar', 'CmdOrCtrl+\\'),
         item('Focus Mode', 'focus-mode', 'CmdOrCtrl+Shift+Enter'),
         item('Claude Panel', 'toggle-agent', 'CmdOrCtrl+J'),
+        item('Comments', 'toggle-comments', 'CmdOrCtrl+Shift+M'),
         {
           label: 'Sort Notes By',
           submenu: [

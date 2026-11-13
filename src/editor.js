@@ -2,9 +2,9 @@
 // image paste/drop, smart URL paste, task toggling. Colours come from CSS variables so themes can restyle it.
 import {
   EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars,
-  drawSelection, dropCursor, rectangularSelection, crosshairCursor,
+  drawSelection, dropCursor, rectangularSelection, crosshairCursor, Decoration,
 } from '@codemirror/view';
-import { EditorState, Compartment } from '@codemirror/state';
+import { EditorState, Compartment, StateField, StateEffect } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { indentOnInput, bracketMatching, syntaxHighlighting, HighlightStyle, syntaxTree } from '@codemirror/language';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
@@ -14,6 +14,29 @@ import { languages } from '@codemirror/language-data';
 import { vim } from '@replit/codemirror-vim';
 import { tags as t } from '@lezer/highlight';
 import { typingKeymap, listMarkers, slashComplete, emojiComplete, fenceComplete } from './typing.js';
+
+// ---------- comment highlights ----------
+// Marks on commented text. They move with edits (mapped through every change), so a comment stays on its words.
+const setCommentsFx = StateEffect.define(); // [{ id, from, to }], activeId
+const commentField = StateField.define({
+  create: () => ({ deco: Decoration.none, active: null }),
+  update(value, tr) {
+    let { deco, active } = value;
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (!e.is(setCommentsFx)) continue;
+      active = e.value.active;
+      const len = tr.state.doc.length;
+      const marks = e.value.list
+        .filter((c) => c.from < c.to && c.to <= len)
+        .sort((a, b) => a.from - b.from || a.to - b.to)
+        .map((c) => Decoration.mark({ class: c.id === active ? 'cm-comment active' : 'cm-comment', attributes: { 'data-cid': c.id }, cid: c.id }).range(c.from, c.to));
+      deco = Decoration.set(marks, true);
+    }
+    return { deco, active };
+  },
+  provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
+});
 
 const v = (name) => `var(${name})`;
 const highlight = HighlightStyle.define([
@@ -74,7 +97,7 @@ const theme = EditorView.theme({
 const TASK_RE = /^((?:\s*>)*\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])\]/;
 const URL_RE = /^https?:\/\/[^\s<>"]+$/;
 
-export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClick, onPasteUrl, getTitles }) {
+export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClick, onPasteUrl, getTitles, onSelection, onCommentClick }) {
   const comps = { vim: new Compartment(), gutter: new Compartment(), spell: new Compartment(), ro: new Compartment() };
   let settings = {};
   let readOnly = false;
@@ -135,8 +158,17 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
     theme,
     comps.spell.of(spellExt()),
     comps.ro.of(roExt()),
-    EditorView.updateListener.of((u) => { if (u.docChanged) onChange(!silent); }),
+    EditorView.updateListener.of((u) => {
+      if (u.docChanged) onChange(!silent);
+      if (onSelection && (u.selectionSet || u.docChanged || u.geometryChanged || u.focusChanged)) onSelection();
+    }),
+    commentField,
     EditorView.domEventHandlers({
+      click(e) {
+        const mark = e.target.closest?.('.cm-comment');
+        if (mark && onCommentClick && !e.metaKey) onCommentClick(mark.getAttribute('data-cid'));
+        return false;
+      },
       // ⌘-click a [[wiki link]] to follow it, or a web link to open it in the browser
       mousedown(e, view) {
         if (!(e.metaKey || e.ctrlKey)) return false;
@@ -228,6 +260,31 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
       if (best < 0) return false;
       view.dispatch({ changes: { from: best, to: best + find.length, insert: replacement }, userEvent: 'input' });
       return true;
+    },
+    // ---- comments ----
+    setComments(list, active = null) { view.dispatch({ effects: setCommentsFx.of({ list, active }) }); },
+    // Current positions of the comment marks: [{ id, from, to }].
+    comments() {
+      const out = [];
+      const cur = view.state.field(commentField).deco.iter();
+      for (; cur.value; cur.next()) out.push({ id: cur.value.spec.cid, from: cur.from, to: cur.to });
+      return out;
+    },
+    selection() {
+      const r = view.state.selection.main;
+      return { from: r.from, to: r.to, text: view.state.sliceDoc(r.from, r.to), empty: r.empty, focused: view.hasFocus };
+    },
+    // Screen position of a document position ({ left, top, bottom }), or null if it's scrolled out of view.
+    coordsAt: (pos) => view.coordsAtPos(pos),
+    slice: (from, to) => view.state.sliceDoc(from, to),
+    // Replace a range as a normal (undoable) user edit.
+    replaceRange(from, to, text) {
+      if (readOnly) return false;
+      view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from, head: from + text.length }, userEvent: 'input' });
+      return true;
+    },
+    select(from, to) {
+      view.dispatch({ selection: { anchor: from, head: to }, effects: EditorView.scrollIntoView(from, { y: 'center' }) });
     },
     run(cmd) {
       if (readOnly) return false;

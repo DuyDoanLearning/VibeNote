@@ -88,6 +88,10 @@
             <button data-mode="split" title="Split (⌘2)">Split</button>
             <button data-mode="preview" title="Preview only (⌘3)">Preview</button>
           </div>
+          <button id="comments-btn" class="icon" title="Comments (⇧⌘M) — select text and press ⌥⌘M to comment">
+            <svg viewBox="0 0 24 24"><path d="M5 5h14a1 1 0 011 1v10a1 1 0 01-1 1h-7l-4 3v-3H5a1 1 0 01-1-1V6a1 1 0 011-1z"/></svg>
+            <span class="cm-count"></span>
+          </button>
           <button id="push-btn" class="btn push-btn" title="Push your changes to Confluence" hidden>
             <svg viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 00.6-7.95A6 6 0 006.2 9.5 4.3 4.3 0 007 18zM12 16v-6M9.5 12.5L12 10l2.5 2.5"/></svg>
             Push
@@ -137,10 +141,12 @@
       </div>
       <footer id="status"><span id="status-words"></span><span id="status-save"></span></footer>
     </main>
+    <aside id="comments"></aside>
     <aside id="agent"></aside>
   </div>
   <div id="overlay" hidden></div>
   <div id="toast"></div>
+  <button id="comment-float" title="Comment on this (⌥⌘M)" hidden>💬</button>
   <script src="dist/renderer.js"></script>
 </body>
 </html>

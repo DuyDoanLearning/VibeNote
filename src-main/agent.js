@@ -201,3 +201,36 @@ export class AgentChat {
     try { this.controller.abort(); } catch {}
   }
 }
+
+// ---------- one-shot answer (comments) ----------
+// A single reply with no tools and no saved session: Claude only sees what we send. Used by @Claude in comments.
+export async function askOnce({ prompt, system, claudePath, env: baseEnv, model, cwd, signal }) {
+  const env = { ...baseEnv, CLAUDE_AGENT_SDK_CLIENT_APP: 'vibenote/0.2' };
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  delete env.CLAUDECODE;
+  const controller = new AbortController();
+  signal?.addEventListener('abort', () => controller.abort());
+  let text = '';
+  const q = query({
+    prompt,
+    options: {
+      cwd: cwd || os.tmpdir(),
+      pathToClaudeCodeExecutable: claudePath,
+      env,
+      model: model || undefined,
+      tools: [],
+      maxTurns: 1,
+      persistSession: false,
+      settingSources: [],
+      systemPrompt: system,
+      abortController: controller,
+      canUseTool: async () => ({ behavior: 'deny', message: 'Comments have no tools.' }),
+    },
+  });
+  for await (const m of q) {
+    if (m.type === 'assistant') for (const b of m.message?.content || []) if (b.type === 'text') text += b.text;
+    if (m.type === 'result' && m.is_error) throw new Error(m.result || m.subtype || 'Claude could not answer');
+  }
+  return text.trim();
+}

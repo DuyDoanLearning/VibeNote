@@ -54,6 +54,12 @@ contextBridge.exposeInMainWorld('vibe', {
     mkdir: invoke('confluence:mkdir'),
     push: invoke('confluence:push'),
   },
+  comments: {
+    read: invoke('comments:read'),
+    write: invoke('comments:write'),
+    ask: invoke('comments:ask'),
+    postToConfluence: invoke('confluence:comment'),
+  },
   flushed: () => ipcRenderer.send('app:flushed'),
   onChanged: (cb) => ipcRenderer.on('vault:changed', () => cb()),
   onCommand: (cb) => ipcRenderer.on('command', (_e, cmd) => cb(cmd)),

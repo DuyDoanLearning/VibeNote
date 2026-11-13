@@ -6,6 +6,7 @@ import { applyTheme } from './theme.js';
 import { createAgentPanel } from './agent-panel.js';
 import { createConfluenceUI, CONFLUENCE_ROOT } from './confluence-ui.js';
 import { confluenceInfo } from './confluence.js';
+import { createComments } from './comments.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
 import { moveLineUp, moveLineDown, copyLineDown, deleteLine } from '@codemirror/commands';
 
@@ -91,6 +92,7 @@ function findByTitle(t) {
 }
 
 // ---------- editor ----------
+let comments = null; // comments panel (created further down; the editor reports selections and clicks to it)
 const editor = createEditor({
   parent: $('#editor'),
   onChange(userEdit) {
@@ -113,6 +115,8 @@ const editor = createEditor({
     editor.replaceNear(pos, url, `[${safe}](${url})`);
   },
   getTitles: () => [...new Set(live().filter((n) => n.path !== S.current).map((n) => n.title))],
+  onSelection: () => comments?.selectionChanged(),
+  onCommentClick: (id) => comments?.commentClicked(id),
 });
 setLinkResolver((title) => !!findByTitle(title));
 
@@ -134,6 +138,7 @@ function onEdit() {
   saveTimer = setTimeout(save, 600);
   clearTimeout(listTimer);
   listTimer = setTimeout(renderList, 200);
+  comments?.noteEdited();
 }
 
 function metaChanged() {
@@ -200,7 +205,7 @@ async function refresh() {
           cur.title = S.meta.title || 'Untitled';
         } else {
           S.meta = cur.meta;
-          if (cur.body !== editor.text()) editor.replaceDoc(cur.body);
+          if (cur.body !== editor.text()) { editor.replaceDoc(cur.body); comments?.reanchor(); }
         }
       }
       renderAll();
@@ -220,6 +225,7 @@ function validateFilter() {
 }
 
 async function leaveCurrent() {
+  await comments?.flush();
   await save();
   const p = S.current;
   if (!p) return;
@@ -262,6 +268,7 @@ async function openNote(path) {
   setStatusSaved(true);
   updateTitle();
   agentPanel.noteChanged();
+  comments?.noteOpened();
 }
 
 function closeNote() {
@@ -272,6 +279,7 @@ function closeNote() {
   editor.setDoc('');
   renderAll();
   updateTitle();
+  comments?.noteOpened();
 }
 
 async function newNote(title) {
@@ -1333,7 +1341,9 @@ const COMMANDS = [
   { id: 'sort-created', title: 'Sort by Date Created', run: () => setSort('created') },
   { id: 'sort-title', title: 'Sort by Title', run: () => setSort('title') },
   { id: 'settings', title: 'Settings', key: '⌘,', run: openSettings },
-  { id: 'toggle-agent', title: 'Toggle Claude Panel', key: '⌘J', run: () => agentPanel.toggle() },
+  { id: 'toggle-agent', title: 'Toggle Claude Panel', key: '⌘J', run: () => { comments.toggle(false); agentPanel.toggle(); } },
+  { id: 'add-comment', title: 'Add Comment on Selection', key: '⌥⌘M', when: needNote, run: () => comments.addComment() },
+  { id: 'toggle-comments', title: 'Toggle Comments', key: '⇧⌘M', run: () => comments.toggle() },
   { id: 'outline', title: 'Go to Heading', key: '⇧⌘O', when: () => !!S.current, run: () => openPalette('#') },
   { id: 'nav-back', title: 'Go Back', key: '⌃-', run: () => navigate(-1) },
   { id: 'nav-forward', title: 'Go Forward', key: '⌃⇧-', run: () => navigate(1) },
@@ -1378,6 +1388,7 @@ function bindUI() {
   $('#add-notebook').addEventListener('click', () => newNotebook());
   $('#cf-fetch').addEventListener('click', () => confluence.openFetch());
   $('#push-btn').addEventListener('click', () => confluence.push());
+  $('#comments-btn').addEventListener('click', () => comments.toggle());
   $('#folder-btn').addEventListener('click', chooseFolder);
   $('#new-note').addEventListener('click', () => newNote());
   $('#empty-new').addEventListener('click', () => newNote());
@@ -1385,7 +1396,7 @@ function bindUI() {
   $('#more-btn').addEventListener('click', moreMenu);
   $('#back-btn').addEventListener('click', () => navigate(-1));
   $('#image-btn').addEventListener('click', insertImages);
-  $('#agent-btn').addEventListener('click', () => agentPanel.toggle());
+  $('#agent-btn').addEventListener('click', () => { comments.toggle(false); agentPanel.toggle(); });
   window.addEventListener('vibe:insert-image', insertImages);
   $('#fwd-btn').addEventListener('click', () => navigate(1));
 
@@ -1501,6 +1512,11 @@ const agentPanel = createAgentPanel({
   beforeSend: () => save(),
   // Claude edits files directly; the folder watcher picks that up, this just makes it snappy.
   onNoteMaybeChanged: () => { clearTimeout(refreshSoon); refreshSoon = setTimeout(refresh, 150); },
+});
+
+comments = createComments({
+  api, S, $, el, esc, editor, toast, metaChanged, isTrashed,
+  closeAgent: () => { if (document.body.classList.contains('agent-open')) agentPanel.toggle(false); },
 });
 
 (async function start() {

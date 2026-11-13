@@ -25,6 +25,12 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - Edit the note, then click **Push** to send your changes back. Only the parts you changed are updated; diagrams, macros and images (the 🔒 boxes) stay as they are.
 - If someone changed the page in Confluence meanwhile, Push stops. Use **Pull Latest from Confluence** (⌘K) to refresh.
 
+## Comments
+
+- Select text and click **💬** (or **⌥⌘M**) to comment on it; **⇧⌘M** shows all comments.
+- Type **@Claude** in a comment (or click **Ask Claude**) and Claude replies in the thread. If it suggests a change, you see before → after and choose **Accept** or **Reject**.
+- On Confluence pages, **Post to Confluence** puts a comment on the page for your team. Comments otherwise stay private, in a hidden `.comments` folder next to your notes.
+
 ## Write
 
 - [x] Paste or drag images straight into a note
