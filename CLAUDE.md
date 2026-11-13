@@ -3,6 +3,7 @@
 Markdown note-taking app for macOS (Electron), built by Claude with and for the repo owner, who uses it every day as their main Markdown app. See README.md for features, data layout and the file map.
 
 ## Read this first (continuing on another machine or session)
+0. **Latest status lives on the `agent` branch in `docs/handoff.md`** (what was built, how to test, what's pending) — read it with `git show origin/agent:docs/handoff.md` even if you work on `main`.
 1. `git fetch --all --tags` — work happens on two branches (see *Branches*); check which one the owner wants.
 2. `npm install` (Node 20+), then `npm run smoke` to confirm the build works without touching real notes.
 3. Read **`docs/handoff.md`** (latest status: what the `agent` branch has, how to test, what's pending), then `docs/agent-spec.md`, `docs/confluence-spec.md` and `docs/ideas.md` (backlog + owner's top picks).
