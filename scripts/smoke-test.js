@@ -38,12 +38,14 @@ app.on('browser-window-created', (_e, win) => {
 
       win.webContents.send('command', 'new-note');
       await wait(800);
-      await js(`(() => { const v = document.querySelector('.cm-content'); v.focus();
-        document.execCommand('insertText', false, '# Smoke test\\n\\n- [ ] task\\n\\n> [!TIP]\\n> It works'); })()`);
+      // The title lives in its own field above the editor; the body goes in the editor.
+      await js(`(() => { const t = document.querySelector('#title-input'); t.value = 'Smoke test';
+        t.dispatchEvent(new Event('input')); t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+        document.execCommand('insertText', false, '- [ ] task\\n\\n> [!TIP]\\n> It works'); })()`);
       await wait(1500);
       await shot('2-new-note');
       const saved = fs.existsSync(path.join(notes, 'Smoke test.md'));
-      console.log('note saved and renamed from title:', saved);
+      console.log('note saved and named after its title:', saved);
       ok = ok && saved;
     } catch (e) {
       console.log('ERROR', e);
