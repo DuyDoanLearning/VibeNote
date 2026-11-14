@@ -108,7 +108,8 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
   const langExt = () => (lang === 'yaml' || lang === 'json'
     ? [lang === 'yaml' ? yaml() : json(), autocompletion({ override: [slashClaudeOnly], icons: false })]
     : [
-      markdown({ base: markdownLanguage, codeLanguages: languages }), listMarkers, EditorView.lineWrapping, typingKeymap,
+      // no "setext" headings (text with a line of - or = under it), same as the preview
+      markdown({ base: markdownLanguage, codeLanguages: languages, extensions: { remove: ['SetextHeading'] } }), listMarkers, EditorView.lineWrapping, typingKeymap,
       autocompletion({ override: [wikiComplete, slashComplete, emojiComplete, fenceComplete], icons: false }),
     ]);
   let settings = {};

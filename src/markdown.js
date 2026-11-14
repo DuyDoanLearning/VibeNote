@@ -19,6 +19,8 @@ function tex(src, displayMode) {
 }
 
 const marked = new Marked({ gfm: true });
+// No "setext" headings: a line of - or = under text must not turn that text into a heading (only # makes headings).
+marked.use({ tokenizer: { lheading() { return undefined; } } }); // undefined (not false) = skip, don't fall back
 marked.use(markedFootnote());
 marked.use({
   extensions: [

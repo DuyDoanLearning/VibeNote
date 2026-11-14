@@ -315,6 +315,8 @@ export function fromConfluence(html) {
 // ---------- Markdown → Confluence HTML (Push) ----------
 
 const md = new Marked({ gfm: true });
+// No "setext" headings: a line of - or = under text must not turn that text into a heading (only # makes headings).
+md.use({ tokenizer: { lheading() { return undefined; } } });
 md.use({
   renderer: {
     code({ text, lang }) {
