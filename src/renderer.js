@@ -12,6 +12,9 @@ import { createWriter } from './writer.js';
 import { createApiDocs } from './apidocs.js';
 import { createChatsUI } from './chats-ui.js';
 import { createChangesUI } from './changes-ui.js';
+import { createProjectUI } from './project-ui.js';
+import { createDiagramUI } from './diagram-ui.js';
+import { createCodeUI } from './code-ui.js';
 import { diffLines } from 'diff';
 import { splitTarget, parseOperation, apiOperations, embeddedSpecs, mdHeadings, linksTo } from './links.js';
 import { toggleWrap, insertLink, setHeading, toggleTask, sortLines, changeCase, joinLines } from './typing.js';
@@ -117,6 +120,9 @@ function findByTitle(t) {
 }
 
 // ---------- editor ----------
+var codeUI = null; // code review: changes, file viewer, comments for Claude (created further down)
+var diagramUI = null; // draw.io diagrams: sidebar section + editor view (created further down)
+var projectUI = null; // projects: sidebar section + home page (created further down)
 let comments = null; // comments panel (created further down; the editor reports selections and clicks to it)
 const editor = createEditor({
   parent: $('#editor'),
@@ -144,10 +150,7 @@ const editor = createEditor({
     const safe = title.replace(/([\[\]])/g, '\\$1');
     editor.replaceNear(pos, url, `[${safe}](${url})`);
   },
-  getTitles: () => {
-    const seen = new Set();
-    return live().filter((n) => n.path !== S.current && !seen.has(n.title) && seen.add(n.title)).map((n) => ({ title: n.title, kind: kindOf(n) }));
-  },
+  getTitles: () => linkables().filter((x) => x.path !== S.current),
   // After [[Title# : endpoints of an API spec (also specs inside notes) and headings of a note
   getFragments: (title) => {
     const n = findByTitle(title);
@@ -160,7 +163,12 @@ const editor = createEditor({
   onSelection: () => comments?.selectionChanged(),
   onCommentClick: (id) => comments?.commentClicked(id),
 });
-setLinkResolver((target) => { const { note } = findByTarget(target); return note ? kindOf(note) : null; });
+setLinkResolver((target) => {
+  const special = specialTarget(target);
+  if (special) return special.found ? special.kind : null;
+  const { note } = findByTarget(target);
+  return note ? kindOf(note) : null;
+});
 const apiDocs = createApiDocs({ api, container: $('#apidocs'), onJump: (line) => editor.gotoLine(line), isDark: () => isDark() });
 
 // ---------- saving ----------
@@ -235,6 +243,8 @@ async function refresh() {
       S.root = data.root;
       S.notebooks = data.notebooks;
       S.notes = data.notes;
+      await projectUI?.reload();
+      await diagramUI?.reload();
       validateFilter();
       if (S.current) {
         let cur = currentNote();
@@ -290,6 +300,8 @@ async function leaveCurrent() {
 async function openNote(path) {
   if (path === S.current) return;
   await leaveCurrent();
+  await diagramUI?.close(true);
+  codeUI?.close(true);
   const n = S.notes.find((x) => x.path === path);
   if (!n) return;
   if (!S.navigating && S.current) {
@@ -305,6 +317,8 @@ async function openNote(path) {
   S.meta = data.meta;
   S.dirty = false;
   S.touched = false;
+  const pj = projectUI?.projectOf(n);
+  if (pj) { S.project = pj; store('project', pj); }
   editor.setDoc(data.body, !!n.trashed, langOf(n));
   if (!SINGLE) store('last', path);
   renderAll();
@@ -350,7 +364,44 @@ async function newNote(title, kind) {
   }
 }
 
+// Everything [[ links and @ mentions can point at: projects, notes, Confluence pages, API specs, diagrams.
+function linkables() {
+  const out = [];
+  const leaf = (nb) => (nb ? nb.split('/').pop() : 'Inbox');
+  for (const p of S.projects || []) out.push({ kind: 'project', title: p.name, insert: `project:${p.name}`, where: p.repo ? `Project · ${p.repo.split('/').pop()}` : 'Project', path: `${S.root}/${p.name}`, repo: p.repo || '' });
+  const seen = new Set();
+  for (const n of live()) {
+    if (seen.has(n.title)) continue;
+    seen.add(n.title);
+    const kind = kindOf(n);
+    out.push({ kind, title: n.title, insert: n.title, where: `${{ confluence: 'Confluence', api: 'API spec' }[kind] || 'Note'} · ${leaf(n.notebook)}`, path: n.path });
+  }
+  const dseen = new Set();
+  for (const d of [...(S.diagrams?.notes || []), ...(S.diagrams?.recent || [])]) {
+    if (dseen.has(d.path)) continue;
+    dseen.add(d.path);
+    out.push({ kind: 'diagram', title: d.name, insert: `diagram:${d.name}`, where: `Diagram · ${d.notebook ? leaf(d.notebook) : (d.folder || '').split('/').pop()}`, path: d.path });
+  }
+  return out;
+}
+
+// [[project:Name]] / [[diagram:Name]] → { kind, found, item }
+function specialTarget(target) {
+  const m = /^(project|diagram):\s*(.+)$/i.exec(String(target).trim());
+  if (!m) return null;
+  const kind = m[1].toLowerCase();
+  const name = m[2].trim().toLowerCase();
+  const item = linkables().find((x) => x.kind === kind && x.title.toLowerCase() === name);
+  return { kind, found: !!item, item, name: m[2].trim() };
+}
+
 async function openByTitle(target) {
+  const special = specialTarget(target);
+  if (special) {
+    if (!special.found) return toast(`No ${special.kind} called “${special.name}”.`);
+    if (special.kind === 'project') return projectUI.openHome(special.item.title);
+    return diagramUI.open(special.item.path);
+  }
   const { note: n, frag } = findByTarget(target);
   if (n) {
     if (!visibleNotes().includes(n)) setFilter({ type: 'all' });
@@ -639,7 +690,7 @@ function snippet(n) {
     .join(' ')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/\[\[([^\]|]*)(\|[^\]]*)?\]\]/g, '$1')
+    .replace(/\[\[([^\n|]+?)(\|[^\n]+?)?\]\](?!\])/g, '$1')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[#>*_`~|$]|\[[ xX]\]|^-|\s-\s/g, ' ')
     .replace(/\s+/g, ' ')
@@ -684,6 +735,16 @@ function renderAll() {
   }
   renderToolbar();
   renderMeta();
+  homeSoon();
+}
+
+// The project home page shows while no note is open; it asks git for news, so refresh it at most every few seconds.
+let homeTimer = null;
+let homeAt = 0;
+function homeSoon() {
+  if (!S.home || S.current || S.diagram || S.code || !projectUI) return;
+  clearTimeout(homeTimer);
+  homeTimer = setTimeout(() => { homeAt = Date.now(); if (S.home && !S.current) projectUI.renderHome(); }, Math.max(300, 4000 - (Date.now() - homeAt)));
 }
 
 function makeDropTarget(node, notebook) {
@@ -724,6 +785,8 @@ function renderSidebar() {
   const f = S.filter;
   const notes = live();
 
+  projectUI?.renderSide();
+  diagramUI?.renderSide();
   const lib = $('#library');
   lib.textContent = '';
   lib.append(
@@ -745,10 +808,12 @@ function renderSidebar() {
       const row = sideRow({
         icon: ICON.book, label: leafOf(nb), count: notes.filter((n) => inBook(n, nb)).length, depth,
         active: f.type === 'notebook' && f.name === nb,
-        onClick: () => setFilter({ type: 'notebook', name: nb }),
+        // A project's folder opens the project home page (its notes still show in the list).
+        onClick: () => (projectUI?.find(nb) ? projectUI.openHome(nb) : setFilter({ type: 'notebook', name: nb })),
         onMenu: () => notebookMenu(nb),
       });
       row.dataset.nb = nb;
+      if (projectUI?.find(nb)) row.title = `${leafOf(nb)} — click to open the project home page`;
       const chev = el('span', 'chev' + (open ? ' open' : ''));
       if (kids) {
         chev.innerHTML = ICON.chevron;
@@ -762,6 +827,55 @@ function renderSidebar() {
   };
   tree('', 0);
   if (!S.notebooks.some((x) => x !== CONFLUENCE_ROOT && x !== API_ROOT)) wrap.append(el('div', 'hint', 'Notebooks are folders. Click + to add one.'));
+
+  // The Confluence section mirrors Confluence's page tree: every page is listed (not only pages with sub-pages),
+  // folders and pages together in title order. A page with sub-pages is a folder whose own page opens on click.
+  const cfTree = (parent, depth, target) => {
+    const books = S.notebooks.filter((x) => parentOf(x) === parent);
+    const pages = notes.filter((n) => n.notebook === parent && !isOwnPage(n, parent));
+    const items = [
+      ...books.map((nb) => ({ nb, label: leafOf(nb) })),
+      ...pages.map((n) => ({ n, label: n.title })),
+    ].sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }));
+    for (const it of items) {
+      if (it.n) {
+        const n = it.n;
+        const row = sideRow({
+          icon: ICON.note, label: n.title, depth,
+          active: n.path === S.current,
+          onClick: () => openNote(n.path),
+          onMenu: () => { openNote(n.path).then(() => noteMenu(n)); },
+        });
+        row.classList.add('cf-page-row');
+        row.prepend(el('span', 'chev')); // same indent as folders (they have a ▸ there)
+        if (S.cfChanged?.has(n.path)) row.classList.add('edited');
+        row.title = n.title;
+        target.append(row);
+        continue;
+      }
+      const nb = it.nb;
+      const own = notes.find((n) => n.notebook === nb && isOwnPage(n, nb));
+      const hasKids = S.notebooks.some((x) => parentOf(x) === nb) || notes.some((n) => n.notebook === nb && !isOwnPage(n, nb));
+      const open = S.expanded.has(nb);
+      const row = sideRow({
+        icon: own ? ICON.note : ICON.book, label: leafOf(nb), count: notes.filter((n) => inBook(n, nb)).length, depth,
+        active: (f.type === 'notebook' && f.name === nb) || (own && own.path === S.current),
+        onClick: () => { setFilter({ type: 'notebook', name: nb }); if (own) openNote(own.path); },
+        onMenu: () => notebookMenu(nb),
+      });
+      row.dataset.nb = nb;
+      row.title = own ? `${leafOf(nb)} — a page with sub-pages` : `${leafOf(nb)} — a Confluence folder`;
+      const chev = el('span', 'chev' + (open ? ' open' : ''));
+      if (hasKids) {
+        chev.innerHTML = ICON.chevron;
+        chev.addEventListener('click', (e) => { e.stopPropagation(); setExpanded(nb, !open); renderSidebar(); });
+      }
+      row.prepend(chev);
+      makeDropTarget(row, nb);
+      target.append(row);
+      if (hasKids && open) cfTree(nb, depth + 1, target);
+    }
+  };
 
   // API specs: every spec file + notes that contain one, and the "APIs" notebook.
   const apiBox = $('#apis');
@@ -803,7 +917,7 @@ function renderSidebar() {
       }));
       cfBox.lastElementChild.classList.add('cf-changes-row');
     }
-    tree(CONFLUENCE_ROOT, 0, cfBox);
+    cfTree(CONFLUENCE_ROOT, 0, cfBox);
   } else {
     cfBox.append(el('div', 'hint', 'Click + to fetch pages from Confluence.'));
   }
@@ -1056,6 +1170,11 @@ function renderList() {
 function renderToolbar() {
   const n = currentNote();
   document.body.classList.toggle('no-note', !n);
+  document.body.classList.toggle('project-home', !n && !!S.home);
+  const chipFor = n && !n.trashed ? projectUI?.projectOf(n) : S.diagram ? projectUI?.projectOfPath(S.diagram) : S.code ? S.project : null;
+  const pchip = $('#project-chip');
+  pchip.hidden = !chipFor;
+  if (chipFor) { pchip.lastElementChild.textContent = chipFor; pchip.title = `Part of the project “${chipFor}” — open its home page`; pchip.dataset.project = chipFor; }
   document.body.classList.toggle('in-trash', !!n?.trashed);
   document.body.classList.toggle('api-note', n?.kind === 'api');
   const sel = $('#nb-select');
@@ -1185,6 +1304,7 @@ function setMode(m) {
 }
 
 function setFilter(f) {
+  if (S.home && !(f.type === 'notebook' && f.name === S.home)) S.home = null; // leaving the project's home page
   S.filter = f;
   store('filter', f);
   if (f.type === 'notebook') expandTo(f.name);
@@ -1215,6 +1335,8 @@ function applySettings(s) {
   root.setProperty('--editor-font', fonts[s.editorFont] || fonts.mono);
   root.setProperty('--editor-size', `${s.fontSize || 15}px`);
   root.setProperty('--line-width', widths[s.lineWidth] || widths.medium);
+  if (s.theme === 'lamplight') document.documentElement.dataset.builtinTheme = 'lamplight';
+  else delete document.documentElement.dataset.builtinTheme;
   editor.applySettings(s);
   renderPreview();
 }
@@ -1286,7 +1408,53 @@ async function noteMenu(n) {
   if (id === 'trash') trashNote(n.path);
 }
 
+// A page with sub-pages lives inside its own notebook ("Parent/Parent.md"); that note is the notebook's page.
+const segName = (t) => String(t).replace(/[\/\\:*?"<>|#\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80).replace(/^\.+/, '').trim();
+function isOwnPage(n, nb) {
+  return n.notebook === nb && nb !== CONFLUENCE_ROOT && (segName(n.title) === leafOf(nb) || n.title === leafOf(nb));
+}
+// The Confluence page to reload a notebook's tree from: its own page, or the nearest page above it.
+function refreshRootFor(nb) {
+  for (let x = nb; x && x !== CONFLUENCE_ROOT; x = parentOf(x)) {
+    const own = live().find((n) => isOwnPage(n, x) && confluenceInfo(n.meta)?.kind === 'page');
+    if (own) return own;
+  }
+  return null;
+}
+async function refreshConfluence(nb = CONFLUENCE_ROOT) {
+  let page = nb === CONFLUENCE_ROOT ? null : refreshRootFor(nb);
+  if (nb === CONFLUENCE_ROOT) {
+    const roots = S.notebooks.filter((x) => parentOf(x) === CONFLUENCE_ROOT).map(refreshRootFor).filter(Boolean);
+    const loose = live().filter((n) => n.notebook === CONFLUENCE_ROOT && confluenceInfo(n.meta)?.kind === 'page');
+    const all = [...new Map([...roots, ...loose].map((n) => [n.path, n])).values()];
+    if (!all.length) return toast('No fetched Confluence pages to refresh yet. Click + next to Confluence to fetch some.');
+    if (all.length === 1) page = all[0];
+    else {
+      const id = await api.popup([{ label: 'Refresh which page tree?', enabled: false }, ...all.map((n, i) => ({ id: String(i), label: n.title }))]);
+      if (id == null) return;
+      page = all[+id];
+    }
+  }
+  if (!page) return toast('Couldn’t find the Confluence page for this folder. Refresh from its parent page instead.');
+  confluence.openFetch(confluenceInfo(page.meta).url);
+}
+
 async function notebookMenu(nb) {
+  const isCf = nb === CONFLUENCE_ROOT || nb.startsWith(CONFLUENCE_ROOT + '/');
+  if (isCf) {
+    const id = await api.popup([
+      { id: 'refresh', label: nb === CONFLUENCE_ROOT ? 'Refresh All from Confluence…' : 'Refresh from Confluence…' },
+      { id: 'changes', label: 'Changes to Push…' },
+      { type: 'separator' },
+      { id: 'note', label: 'New Note Here' },
+      ...(nb === CONFLUENCE_ROOT ? [] : [{ type: 'separator' }, { id: 'delete', label: 'Delete…' }]),
+    ]);
+    if (id === 'refresh') refreshConfluence(nb);
+    if (id === 'changes') changesUI.open();
+    if (id === 'note') { setFilter({ type: 'notebook', name: nb }); newNote(); }
+    if (id === 'delete') deleteNotebook(nb);
+    return;
+  }
   const id = await api.popup([
     { id: 'note', label: 'New Note Here' },
     { id: 'sub', label: 'New Notebook Inside' },
@@ -1498,6 +1666,7 @@ async function openSettings() {
           <option value="system">Match system (light / dark)</option>
           <option value="light">VibeNote Light</option>
           <option value="dark">VibeNote Dark</option>
+          <option value="lamplight">Lamplight notebook (dark, graph paper)</option>
         </optgroup>
         <optgroup label="Visual Studio Code">
           <option value="vscode">Same as VS Code (follows changes)</option>
@@ -1677,6 +1846,7 @@ const COMMANDS = [
   { id: 'empty-trash', title: 'Empty Trash', run: emptyTrash },
   { id: 'confluence-fetch', title: 'Fetch from Confluence…', when: () => !SINGLE, run: () => confluence.openFetch() },
   { id: 'confluence-push', title: 'Push to Confluence…', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.push() },
+  { id: 'confluence-refresh', title: 'Refresh Confluence Pages… (reload a page tree, incl. new pages)', when: () => !SINGLE, run: () => refreshConfluence(CONFLUENCE_ROOT) },
   { id: 'confluence-changes', title: 'Changes to Push to Confluence…', when: () => !SINGLE, run: () => changesUI.open() },
   { id: 'confluence-publish', title: 'Publish as a New Confluence Page…', when: () => !isTrashed() && !!currentNote() && !confluenceInfo(S.meta) && !isApi(), run: () => confluence.publishNote() },
   { id: 'confluence-pull', title: 'Pull Latest from Confluence', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.pull() },
@@ -1698,8 +1868,22 @@ const COMMANDS = [
   { id: 'sections-expand', title: 'Expand All Note List Headings', when: () => !SINGLE && S.sections.length > 0, run: () => setSections(true) },
   { id: 'sections-collapse', title: 'Collapse All Note List Headings', when: () => !SINGLE && S.sections.length > 0, run: () => setSections(false) },
   { id: 'settings', title: 'Settings', key: '⌘,', run: openSettings },
+  { id: 'coding-layout', title: 'Toggle Coding Layout', key: '⌥⌘J', when: () => !SINGLE, run: () => toggleCoding() },
+  { id: 'review-changes', title: 'Review Code Changes', when: () => !SINGLE && !!S.project, run: () => codeUI.openChanges() },
+  { id: 'new-diagram', title: 'New Diagram (draw.io)', when: () => !SINGLE, run: () => diagramUI.create(S.home || (S.filter.type === 'notebook' ? S.filter.name : '')) },
+  { id: 'open-diagram', title: 'Open Diagram File…', when: () => !SINGLE, run: () => diagramUI.pick() },
+  { id: 'new-project', title: 'New Project…', when: () => !SINGLE, run: () => projectUI.newProject() },
+  { id: 'project-home', title: 'Go to Project Home', when: () => !SINGLE && !!(projectUI.projectOf(currentNote()) || S.project), run: () => projectUI.openHome(projectUI.projectOf(currentNote()) || S.project) },
+  { id: 'new-chat', title: 'New Claude Chat in This Project', run: () => { comments.toggle(false); agentPanel.toggle(true); agentPanel.newThread(); } },
   { id: 'toggle-agent', title: 'Toggle Claude Panel', key: '⌘J', run: () => { comments.toggle(false); agentPanel.toggle(); } },
   { id: 'claude-chats', title: 'Claude Chats… (past chats: read, continue, save as note)', when: () => !SINGLE, run: () => chatsUI.open() },
+  { id: 'open-guide', title: 'VibeNote Guide (how everything works)', when: () => !SINGLE, run: async () => {
+    const name = await api.openGuide();
+    if (!name) return toast('The guide isn’t part of this build.');
+    await refresh();
+    await projectUI.reload();
+    projectUI.openHome(name);
+  } },
   { id: 'claude-write', title: 'Ask Claude to Write… (/claude)', key: '⇧⌘J', when: needNote, run: () => writer.open() },
   { id: 'add-comment', title: 'Add Comment on Selection', key: '⌥⌘M', when: needNote, run: () => comments.addComment() },
   { id: 'toggle-comments', title: 'Toggle Comments', key: '⇧⌘M', run: () => comments.toggle() },
@@ -1756,6 +1940,9 @@ function bindUI() {
   $('#more-btn').addEventListener('click', moreMenu);
   $('#back-btn').addEventListener('click', () => navigate(-1));
   $('#image-btn').addEventListener('click', insertImages);
+  $('#project-add').addEventListener('click', () => projectUI.newProject());
+  $('#diagram-add').addEventListener('click', () => diagramUI.addMenu(S.home || (S.filter.type === 'notebook' ? S.filter.name : '')));
+  $('#project-chip').addEventListener('click', (e) => projectUI.openHome(e.currentTarget.dataset.project));
   $('#agent-btn').addEventListener('click', () => { comments.toggle(false); agentPanel.toggle(); });
   window.addEventListener('vibe:insert-image', insertImages);
   $('#fwd-btn').addEventListener('click', () => navigate(1));
@@ -1873,10 +2060,13 @@ const confluence = createConfluenceUI({
 let refreshSoon = null;
 const agentPanel = createAgentPanel({
   api,
+  getLinkables: () => linkables(),
   getContext: () => {
     const n = currentNote();
+    if (S.code) return { notebook: S.project || '', notePath: S.code.tab === 'file' ? S.code.file : null, noteTitle: S.code.tab === 'file' && S.code.file ? `${S.code.file.split('/').pop()} (a code file, open in the viewer${S.code.line ? `, line ${S.code.line}` : ''})` : null };
+    if (S.diagram) return { notebook: projectUI?.projectOfPath(S.diagram) || '', notePath: S.diagram, noteTitle: `${S.diagram.split('/').pop()} (a draw.io diagram, open in the editor)` };
     return {
-      notebook: n ? n.notebook : (S.filter.type === 'notebook' ? S.filter.name : ''),
+      notebook: (n ? projectUI?.projectOf(n) || n.notebook : S.home || (S.filter.type === 'notebook' ? S.filter.name : '')),
       notePath: n && !n.trashed ? n.path : null,
       noteTitle: n ? n.title : null,
     };
@@ -1885,7 +2075,21 @@ const agentPanel = createAgentPanel({
   // Claude edits files directly; the folder watcher picks that up, this just makes it snappy.
   onNoteMaybeChanged: () => { clearTimeout(refreshSoon); refreshSoon = setTimeout(refresh, 150); },
   openChats: () => chatsUI.open(),
+  openFile: (mention) => codeUI.openMention(mention),
+  openChanges: () => codeUI.openChanges(),
+  toggleCoding: () => toggleCoding(),
 });
+
+// Coding layout: the chat takes the middle, the code (or the document) sits beside it.
+async function toggleCoding(force) {
+  const on = force ?? !document.body.classList.contains('coding');
+  if (!on) { document.body.classList.remove('coding'); editor.view.requestMeasure(); return; }
+  comments.toggle(false);
+  await agentPanel.toggle(true);
+  document.body.classList.add('coding');
+  if (!S.current && !S.diagram && !S.code && S.project && projectUI.find(S.project)?.repo) await codeUI.openChanges();
+  editor.view.requestMeasure();
+}
 
 // "Changes to push": Confluence pages edited here but not pushed yet.
 var changesUI = createChangesUI({
@@ -1901,7 +2105,7 @@ var changesUI = createChangesUI({
 // Claude Chats window: past Claude Code chats → read, continue in the panel, save as a note.
 const chatsUI = createChatsUI({
   api, $, el, overlay, closeOverlay, toast,
-  getNotebook: () => { const n = currentNote(); return n ? n.notebook : (S.filter.type === 'notebook' ? S.filter.name : ''); },
+  getNotebook: () => { const n = currentNote(); return n ? projectUI?.projectOf(n) || n.notebook : S.home || (S.filter.type === 'notebook' ? S.filter.name : ''); },
   afterContinue: async (key) => {
     await save();
     await refresh();
@@ -1917,6 +2121,34 @@ const chatsUI = createChatsUI({
     if (n && !visibleNotes().includes(n)) setFilter({ type: 'all' });
     await openNote(p);
   },
+});
+
+codeUI = createCodeUI({
+  api, S, $, el, toast, leaveCurrent, closeNote,
+  afterChange: () => { renderAll(); },
+  closeOthers: () => diagramUI.close(true),
+  getNotebook: () => S.project || '',
+  askClaude: async (text, label) => { comments.toggle(false); await agentPanel.toggle(true); agentPanel.ask(text, label); },
+});
+
+diagramUI = createDiagramUI({
+  beforeOpen: () => codeUI.close(true),
+  api, S, $, el, toast, isDark, leaveCurrent, closeNote,
+  afterChange: () => { renderAll(); agentPanel.noteChanged(); },
+});
+
+projectUI = createProjectUI({
+  openDiagram: (p) => diagramUI.open(p),
+  deleteDiagram: (p) => diagramUI.remove(p),
+  newDiagram: (nb) => diagramUI.create(nb),
+  closeDiagram: () => { codeUI.close(true); return diagramUI.close(true); },
+  openCodeChanges: (repo) => codeUI.openChanges(repo),
+  api, S, $, el, esc, overlay, closeOverlay, toast, live, inBook, kindOf, fmtDate, openNote, setFilter, leaveCurrent, closeNote, refresh, store, load, currentNote,
+  reserved: [CONFLUENCE_ROOT, API_ROOT],
+  agent: () => agentPanel,
+  openChats: (target) => chatsUI.open(target),
+  openChanges: () => changesUI.open(),
+  rerenderList: () => renderList(),
 });
 
 comments = createComments({

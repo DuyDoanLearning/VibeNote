@@ -3,8 +3,8 @@
 Markdown note-taking app for macOS (Electron), built by Claude with and for the repo owner, who uses it every day as their main Markdown app. See README.md for features, data layout and the file map.
 
 ## Where things stand (updated 2026-11-14)
-- **Stable = `v1.1.0-stable` on `main`**: notes, Claude panel, Confluence, API specs.
-- **`agent` branch = the owner's daily build right now**: Projects workspace steps 1–3 (projects + home page + multi-repo workspace + several chats per project; draw.io diagrams; coding layout with Changes review, line comments for Claude and a file viewer). All committed, pushed and installed on the owner's main Mac. The owner is trying them for real; expect feedback and small fixes before the next step.
+- **Stable = `v1.2.0-stable` on `main`** (owner made it official on 2026-11-14): notes, Claude panel, Confluence, API specs, plus Projects workspace steps 1–3 (projects + home page + multi-repo workspace + several chats per project; draw.io diagrams; coding layout with Changes review, line comments for Claude and a file viewer), VibeNote Guide, Lamplight theme.
+- **`agent` branch** = where new work starts (it equals `main` at v1.2.0). The owner's Mac runs the build from `agent`; merge into `main` + tag again when the owner wants a new official version.
 - **Next agreed step: 4, spec watch** (a followed Confluence page changes → what changed and which code / API specs it affects), then 5, Figma → API proposal. Owner's newer ideas (context bridge to T3 Code / a terminal `claude`, "Build this" button on a spec, project memory, local folders as context, a codebase-memory MCP server) are in `docs/workspace-spec.md` → "Ideas attached to this spec" and `docs/ideas.md`. Ask which they want before starting something big.
 - The owner keeps a plain-language backlog note in their notes, "Workspace backlog" (they moved it to the Inbox; find it by title, don't assume a notebook). Keep it in step with `docs/` when a step is finished: tick the step and add a short "how to try it".
 
@@ -22,10 +22,10 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - Liked: Inkdrop-style experience (left-aligned, tight spacing, explicit title field), VS Code themes, keyboard-driven editing. **Never mention "Inkdrop" in anything public in this repo** (README, docs, code comments, GitHub description).
 - Usual loop after each change: test in an isolated profile → `npm run package` → quit the running app gracefully (`osascript -e 'tell application "VibeNote" to quit'`) → copy the .app to /Applications → reopen → commit → push. The owner expects things committed and pushed.
 - Commit author is the owner's git identity; repo is public on GitHub (`DuyDoanLearning/VibeNote`, MIT).
-- When a user-facing feature changes, update `welcome.md` (first-run note) and, if asked, the owner's "Guide" notebook notes (in their notes folder, not the repo).
+- When a user-facing feature changes, update `welcome.md` (first-run note) and the matching note in `guide/` (the built-in VibeNote Guide project, synced into the notes folder).
 
 ## Branches / releases
-- `main` + tags `v*-stable` (newest: `v1.1.0-stable`, which brought the Claude panel, Confluence and API specs into stable on 2026-11-13; `v1.0.2-stable` is the last notes-only release) = the stable app. Keep it stable; only fixes and docs go here. Tag each stable fix release `vX.Y.Z-stable` (the install script picks the newest).
+- `main` + tags `v*-stable` (newest: `v1.2.0-stable`, which brought the Projects workspace, diagrams and the coding layout into stable on 2026-11-14; `v1.1.0-stable` brought the Claude panel, Confluence and API specs; `v1.0.2-stable` is the last notes-only release) = the stable app. Keep it stable; only fixes and docs go here. Tag each stable fix release `vX.Y.Z-stable` (the install script picks the newest).
 - `agent` = experimental work. Current experiment: the Projects workspace (spec: `docs/workspace-spec.md`).
 - `scripts/install-version.sh <ref>` builds any version in a temporary worktree and installs it into /Applications — the owner's rollback path (no argument = newest `v*-stable` tag) and upgrade path (`agent`).
 
@@ -66,13 +66,6 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - Coding layout = `body.coding` (only with `agent-open`, not with `comments-open`): `#agent` moves to grid column 3 and `#main` to column 4 by explicit `grid-column` (`order` does not work: `#agent` has a fixed column).
 - `restartFresh()` in main.js: when resume fails with "No conversation found with session ID", the chat restarts with `transcriptOf(items)` as background. A test that deletes `~/.claude/projects/<folder>` will trigger it.
 - Name clash to avoid: `openChanges` in the projectUI context is the Confluence "Changes to push" window; the code review is `openCodeChanges`.
-
-## Commands
-- `npm start` — build + run (dev)
-- `npm run build` — `build.mjs`: bundles `src/renderer.js` → `dist/renderer.js` and `src-main/agent.js` → `dist/agent.mjs`, copies KaTeX + Mermaid into `dist/`
-- `npm run package` — `release/VibeNote-darwin-<arch>/VibeNote.app` (with `build/icon.icns`)
-- `npm run smoke` — `scripts/smoke-test.js`
-- `npm run icon` — rebuild `build/icon.png` / `.icns` from `build/icon.svg`
 
 ## Testing — important
 - **Never run the app under test against the real profile.** Electron's `userData` ignores `$HOME`; a test that changes settings will overwrite the owner's real `~/Library/Application Support/VibeNote/config.json` (this happened once and pointed their notes folder at a temp dir). Always call `app.setPath('userData', <temp dir>)` before requiring `main.js`, and point `config.root` at a temp notes folder — `scripts/smoke-test.js` shows the pattern.

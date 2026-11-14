@@ -8,7 +8,9 @@
 // Note metadata (tags, status, pinned) lives in YAML front matter at the top of each file.
 // Revision history is local-only, in <userData>/history/<file inode>/<timestamp>.md.
 
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, net, protocol } = require('electron');
+// The bundled draw.io editor runs in a frame with its own origin (so it can load its files but not touch VibeNote).
+protocol.registerSchemesAsPrivileged([{ scheme: 'vibe-drawio', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
@@ -16,6 +18,7 @@ const os = require('os');
 const { pathToFileURL } = require('url');
 const themes = require('./themes');
 const claudeChats = require('./claude-chats');
+const projects = require('./projects');
 
 // Also trust the certificates the Mac trusts (like browsers do): on a company network whose proxy re-signs HTTPS with
 // a certificate IT installed on the Mac, Atlassian / Swagger requests then work instead of failing. Never turns checks off.
@@ -117,6 +120,9 @@ function loadConfig() {
     const c = JSON.parse(fs.readFileSync(configPath(), 'utf8'));
     if (c.root) config.root = c.root;
     if (c.projects && typeof c.projects === 'object') config.projects = c.projects;
+    if (c.projectSeen && typeof c.projectSeen === 'object') config.projectSeen = c.projectSeen;
+    if (Array.isArray(c.recentDiagrams)) config.recentDiagrams = c.recentDiagrams.filter((x) => typeof x === 'string');
+    if (c.guides && typeof c.guides === 'object') config.guides = c.guides;
     config.settings = { ...DEFAULT_SETTINGS, ...(c.settings || {}) };
   } catch {}
 }
@@ -795,7 +801,8 @@ function applyTheme() {
     const key = t === 'vscode' ? themes.vscodeThemeKey(nativeTheme.shouldUseDarkColors) : t.slice(6);
     theme = key ? themes.loadTheme(key) : null;
   }
-  nativeTheme.themeSource = theme ? theme.type : ['light', 'dark'].includes(t) ? t : 'system';
+  // Built-in "Lamplight notebook" is a dark theme drawn by styles.css (html[data-builtin-theme="lamplight"]).
+  nativeTheme.themeSource = theme ? theme.type : t === 'lamplight' ? 'dark' : ['light', 'dark'].includes(t) ? t : 'system';
   currentTheme = theme;
   broadcast('theme:changed', theme);
 }
@@ -881,25 +888,73 @@ function writeChat(key, data) {
   fs.writeFileSync(chatFile(key), JSON.stringify({ sessionId: data.sessionId, cwd: data.cwd || undefined, fork: data.fork || undefined, background: data.background || undefined, items: data.items.slice(-400) }, null, 1));
 }
 
-function projectFor(notebook) {
-  const key = String(notebook || '').split('/')[0];
-  const repo = key && config.projects[key];
-  return repo && fs.existsSync(repo) ? { key, repo } : { key: '', repo: null, notebook: key };
+// Several chats per project. '' is a project's first chat (file "<project>.json", as before chats could be
+// several); the others are "<project>#<id>". The index lives next to the chat files.
+const threadsFile = () => path.join(chatsDir(), '_threads.json');
+let threadIndex = null;
+function allThreads() {
+  if (!threadIndex) { try { threadIndex = JSON.parse(fs.readFileSync(threadsFile(), 'utf8')); } catch { threadIndex = {}; } }
+  return threadIndex;
+}
+function saveThreads() {
+  fs.mkdirSync(chatsDir(), { recursive: true });
+  fs.writeFileSync(threadsFile(), JSON.stringify(allThreads(), null, 1));
+}
+function projectThreads(name) {
+  const all = allThreads();
+  const pt = (all[name] ||= { active: '', list: [] });
+  if (!pt.list.length) pt.list.push({ id: '', title: '', created: 0 });
+  return pt;
+}
+const chatKey = (name, id) => (id ? `${name}#${id}` : name);
+// Each chat can have its own model, effort and permission mode; without one it uses the defaults from Settings.
+function threadByKey(key) {
+  const i = String(key).indexOf('#');
+  const name = i < 0 ? String(key) : key.slice(0, i);
+  const id = i < 0 ? '' : key.slice(i + 1);
+  return projectThreads(name).list.find((t) => t.id === id) || null;
+}
+const chatPrefs = (key) => {
+  const t = threadByKey(key) || {};
+  return { model: t.model ?? config.settings.agentModel ?? '', effort: t.effort ?? config.settings.agentEffort ?? '', mode: t.mode ?? config.settings.agentMode ?? 'default' };
+};
+const isProjectName = (name) => !!name && (!!config.projects[name] || fs.existsSync(path.join(rootDir(), name, projects.BRIEF)));
+
+// The project a notebook belongs to, and which of its chats is in front.
+//   name: project (top-level notebook) or '' for plain notes · key: the chat's id for files, events and the chats map
+function projectFor(notebook, threadId) {
+  const top = String(notebook || '').split('/')[0];
+  const linked = top && config.projects[top];
+  const repo = linked && fs.existsSync(linked) ? linked : null;
+  const name = top && (repo || isProjectName(top)) ? top : '';
+  const pt = projectThreads(name);
+  const th = pt.list.find((t) => t.id === (threadId ?? pt.active)) || pt.list[0];
+  return { name, repo, notebook: top, thread: th.id, key: chatKey(name, th.id) };
 }
 
-function systemPromptFor(project) {
+function systemPromptFor(project, info = {}) {
   const root = rootDir();
   const lines = [
     'You are running inside VibeNote, the user\'s Markdown notes app, as their writing and coding assistant. The user reads your replies in a narrow chat panel: keep them short and plain-spoken.',
     `- The user's notes are plain Markdown files in ${root}. Notebooks are folders. A note's title is its file name (an optional "title:" in the YAML front matter overrides it). Front matter may also hold tags, status (active/onhold/completed/dropped) and pinned — keep it intact.`,
     '- You can read and edit notes directly with your file tools; the user sees your edits appear live in the editor.',
     '- Every note has a version history (who changed it — You, Claude or Confluence — and when). Use the note_history tool (mcp__vibenote__note_history) to list a note\'s versions or see exactly what changed in one, e.g. when asked what changed recently or why something is different.',
+    '- Diagrams are draw.io files (.drawio, XML). When the user has one open in VibeNote they see your edits to the file appear live. Write uncompressed <mxGraphModel> XML, keep existing cell ids, and change only what was asked.',
     '- API specs are OpenAPI YAML/JSON files in the notes folder; [[Title]] and [[Title#Heading]] / [[Spec#GET /path]] link notes, Confluence pages and specs.',
   ];
+  if (project.name && info.sources?.length) {
+    lines.push(`- Documents that belong to this project but live elsewhere in the notes folder (specs, Confluence pages written by the business analyst, API specs): ${info.sources.map((s) => `"${path.join(root, s)}"`).join(', ')}. Read them when the task depends on requirements.`);
+  }
+  if (project.name && info.brief) {
+    lines.push(`- Project brief (the note "${path.join(root, project.name, projects.BRIEF)}"). Treat it as what you already know about this project, and add a line to its Decisions when a real decision is made:\n<project-brief>\n${info.brief}\n</project-brief>`);
+  }
   if (project.repo) {
-    const nb = path.join(root, project.key);
+    const nb = path.join(root, project.name);
+    if (info.repos?.length > 1 || (info.repos?.length === 1 && info.repos[0].rel)) {
+      lines.push(`- The project's workspace folder ${project.repo} holds several git repositories: ${info.repos.map((r) => (r.rel || '.') + (r.hasGuide ? ' (has its own CLAUDE.md)' : '')).join(', ')}. Each is its own repository: run git inside the repository you are changing, read a repository's CLAUDE.md before working in it, and say which repository you changed.${info.cwd && info.cwd !== project.repo ? ` This chat is focused on ${path.relative(project.repo, info.cwd)} (your working directory).` : ''}`);
+    }
     lines.push(
-      `- Current project: notebook "${project.key}" (${nb}), linked to the code repository ${project.repo} (your working directory).`,
+      `- Current project: notebook "${project.name}" (${nb}), linked to the code ${info.repos?.length > 1 ? 'workspace' : 'repository'} ${project.repo}${info.cwd && info.cwd !== project.repo ? '' : ' (your working directory)'}.`,
       'Note-driven workflow:',
       '- Spec notes say what the user wants. When asked to plan, write the plan into the note as a checklist of small steps ("- [ ] step") and stop for review — do not start coding until the user says so.',
       '- When building, do one plan step at a time. When a step is done (and committed), tick its checkbox ("- [x]").',
@@ -949,15 +1004,17 @@ async function ensureChat(wc, key, project) {
   // A continued chat runs in the folder it was started in (Claude Code finds chats by folder) — if that's inside the project.
   const cwd = saved.cwd && project.repo && (saved.cwd === project.repo || saved.cwd.startsWith(project.repo + path.sep)) && fs.existsSync(saved.cwd)
     ? saved.cwd : project.repo || rootDir();
-  state = { key, wc, items: saved.items || [], sessionId: saved.sessionId || null, cwd: cwd === (project.repo || rootDir()) ? undefined : cwd, fork: !!saved.fork, background: saved.background };
+  state = { key, wc, items: saved.items || [], sessionId: saved.sessionId || null, cwd: cwd === (project.repo || rootDir()) ? undefined : cwd, fork: !!saved.fork, background: saved.background, pending: new Map() };
+  const info = project.name ? await promptInfo(project, cwd) : {};
   state.chat = new mod.AgentChat({
     cwd,
     fork: state.fork,
-    additionalDirectories: project.repo ? [rootDir()] : [],
-    appendSystemPrompt: systemPromptFor(project),
-    model: config.settings.agentModel,
-    effort: config.settings.agentEffort || undefined,
-    permissionMode: config.settings.agentMode,
+    // a chat focused on one repository can still read the rest of the workspace (upstream / downstream services)
+    additionalDirectories: project.repo ? [rootDir(), ...(cwd !== project.repo ? [project.repo] : [])] : [],
+    appendSystemPrompt: systemPromptFor(project, info),
+    model: chatPrefs(key).model,
+    effort: chatPrefs(key).effort || undefined,
+    permissionMode: chatPrefs(key).mode,
     resume: state.sessionId,
     claudePath,
     env,
@@ -983,6 +1040,12 @@ async function ensureChat(wc, key, project) {
       return historyForAI(file, { version, compare_to });
     },
     onEvent: (evt) => {
+      if (state.dead) return; // replaced by a fresh conversation (see restartFresh)
+      // Claude Code keeps conversations for a limited time. If this one is gone, carry on in a new one.
+      if (evt.kind === 'error' && /No conversation found with session ID/i.test(evt.message || '') && state.sessionId && state.lastSent && !state.retried) {
+        restartFresh(state, project).catch((e) => { record(state, { kind: 'error', message: e.message }); agentSend(state.wc, key, { kind: 'error', message: e.message }); });
+        return;
+      }
       record(state, evt);
       agentSend(state.wc, key, evt);
     },
@@ -990,6 +1053,7 @@ async function ensureChat(wc, key, project) {
       const id = `p${++permSeq}`;
       const finish = (decision) => {
         permissionWaits.delete(id);
+        state.pending.delete(id);
         if (!decision || decision.behavior === 'deny') {
           resolve({ behavior: 'deny', message: decision?.message || 'The user declined this action.' });
         } else {
@@ -998,16 +1062,49 @@ async function ensureChat(wc, key, project) {
       };
       permissionWaits.set(id, { finish, input, suggestions });
       signal?.addEventListener('abort', () => { if (permissionWaits.has(id)) { finish(null); agentSend(state.wc, key, { kind: 'permission_cancel', id }); } });
-      agentSend(state.wc, key, { kind: 'permission', id, tool, input, title, reason, canRemember: !!suggestions?.length });
+      const evt = { kind: 'permission', id, tool, input, title, reason, canRemember: !!suggestions?.length };
+      state.pending.set(id, evt); // so the card can be shown again when the user comes back to this chat
+      agentSend(state.wc, key, evt);
     }),
   });
   chats.set(key, state);
   return state;
 }
 
+// What was said in a chat (your messages and Claude's replies, newest kept), to hand to a new conversation.
+function transcriptOf(items, max = 20000) {
+  const msgs = (items || []).filter((i) => (i.kind === 'user' || i.kind === 'text') && i.text?.trim());
+  const out = [];
+  let size = 0;
+  for (let i = msgs.length - 1; i >= 0 && size < max; i--) {
+    let t = msgs[i].text.replace(/<vibenote-context>[\s\S]*?<\/vibenote-context>\s*/g, '').trim();
+    if (!t) continue;
+    if (t.length > 3000) t = t.slice(0, 3000) + ' …';
+    out.unshift(`${msgs[i].kind === 'user' ? 'User' : 'Claude'}: ${t}`);
+    size += t.length;
+  }
+  return out.join('\n\n');
+}
+async function restartFresh(old, project) {
+  const text = old.lastSent;
+  old.dead = true;
+  old.chat.close();
+  chats.delete(old.key);
+  const earlier = transcriptOf(old.items.slice(0, -1)); // everything before the message that just failed
+  const note = { kind: 'note', text: 'Claude Code no longer has this conversation stored, so it continues as a new one with the recent messages as background' };
+  const items = old.items.filter((i) => !(i.kind === 'result' && i === old.items[old.items.length - 1]));
+  writeChat(old.key, { sessionId: null, cwd: old.cwd, items: [...items, note] });
+  const fresh = await ensureChat(old.wc, old.key, project);
+  fresh.retried = true;
+  fresh.lastSent = text;
+  agentSend(old.wc, old.key, { kind: 'restart', text: note.text });
+  fresh.chat.send(`${earlier ? `<previous-conversation>\n${earlier}\n</previous-conversation>\n\nThe conversation above happened earlier in this chat; continue from it.\n\n` : ''}${text}`);
+}
+
 ipcMain.handle('agent:context', async (_e, notebook) => {
   const project = projectFor(notebook);
-  const state = chats.get(project.key) || { key: project.key, ...readChat(project.key) };
+  const live = chats.get(project.key);
+  const state = live || { key: project.key, ...readChat(project.key) };
   let claudePath = null;
   try {
     const mod = await loadAgent();
@@ -1015,11 +1112,16 @@ ipcMain.handle('agent:context', async (_e, notebook) => {
   } catch {}
   return {
     key: project.key,
-    notebook: project.key || project.notebook || '',
+    name: project.name,
+    thread: project.thread,
+    notebook: project.name || project.notebook || '',
     repo: project.repo,
+    cwd: state.cwd || null,
+    ...chatPrefs(project.key),
     claudePath,
-    busy: !!chats.get(project.key)?.chat?.busy,
+    busy: !!live?.chat?.busy,
     items: state.items || [],
+    pending: live && !live.chat.closed ? [...live.pending.values()] : [],
     hasSession: !!state.sessionId,
   };
 });
@@ -1039,20 +1141,25 @@ ipcMain.handle('agent:link', async (e, notebook) => {
 ipcMain.handle('agent:unlink', (_e, key) => {
   delete config.projects[key];
   saveConfig();
-  const st = chats.get(key);
-  if (st) { st.chat.close(); chats.delete(key); }
+  closeProjectChats(key);
 });
 
-ipcMain.handle('agent:send', async (e, { notebook, text, notePath, noteTitle }) => {
+ipcMain.handle('agent:send', async (e, { notebook, text, notePath, noteTitle, label, mentions }) => {
   const project = projectFor(notebook);
   const state = await ensureChat(e.sender, project.key, project);
+  const th = projectThreads(project.name).list.find((t) => t.id === project.thread);
+  if (th && !th.title && th.id && !state.items.some((i) => i.kind === 'user')) {
+    th.title = String(label || text).replace(/\s+/g, ' ').trim().slice(0, 60);
+    saveThreads();
+  }
   const context = notePath
     ? `<vibenote-context>\nThe user is viewing the note "${noteTitle}" — ${notePath}\n</vibenote-context>\n\n`
     : '';
   state.items.push({ kind: 'user', text });
   const background = state.background ? `${state.background}\n\nThe conversation above happened earlier (in another app); continue from it.\n\n` : '';
   state.background = undefined;
-  state.chat.send(background + context + text);
+  state.lastSent = background + context + (typeof mentions === 'string' ? mentions : '') + text;
+  state.chat.send(state.lastSent);
   return { key: project.key };
 });
 
@@ -1064,27 +1171,27 @@ const liveChat = async (e, notebook) => {
   return (await ensureChat(e.sender, project.key, project)).chat;
 };
 ipcMain.handle('agent:commands', async (e, nb) => (await liveChat(e, nb)).commands());
-ipcMain.handle('agent:models', async (e, nb) => ({ models: await (await liveChat(e, nb)).models(), current: config.settings.agentModel || '' }));
+ipcMain.handle('agent:models', async (e, nb) => ({ models: await (await liveChat(e, nb)).models(), current: chatPrefs(projectFor(nb).key).model }));
 ipcMain.handle('agent:set-model', async (e, nb, value) => {
   const v = value === 'default' ? '' : String(value || '');
   await (await liveChat(e, nb)).setModel(v);
-  config.settings.agentModel = v;
-  saveConfig();
+  const th = threadByKey(projectFor(nb).key);
+  if (th) { th.model = v; saveThreads(); } // this chat only; Settings → Claude holds the default for new chats
   return v;
 });
 ipcMain.handle('agent:set-effort', async (e, nb, level) => {
   const v = level === 'default' ? '' : String(level || '');
   await (await liveChat(e, nb)).setEffort(v);
-  config.settings.agentEffort = v;
-  saveConfig();
+  const th = threadByKey(projectFor(nb).key);
+  if (th) { th.effort = v; saveThreads(); }
   return v;
 });
 ipcMain.handle('agent:usage', async (e, nb) => (await liveChat(e, nb)).usage());
 ipcMain.handle('agent:context-usage', async (e, nb) => (await liveChat(e, nb)).contextUsage());
 ipcMain.handle('agent:mcp', async (e, nb) => (await liveChat(e, nb)).mcpStatus());
 ipcMain.handle('agent:mode', async (_e, key, mode) => {
-  config.settings.agentMode = mode;
-  saveConfig();
+  const th = threadByKey(key);
+  if (th) { th.mode = mode; saveThreads(); }
   await chats.get(key)?.chat.setMode(mode);
 });
 ipcMain.handle('agent:new', (_e, key) => {
@@ -1092,6 +1199,397 @@ ipcMain.handle('agent:new', (_e, key) => {
   if (st) { st.chat.close(); chats.delete(key); }
   writeChat(key, { sessionId: null, items: [] }); // also resets a continued chat's folder
 });
+// ---------- several chats per project ----------
+function closeProjectChats(name) {
+  for (const [key, st] of chats) {
+    if (key === name || key.startsWith(name + '#')) { st.chat.close(); chats.delete(key); }
+  }
+}
+const chatStatus = (key) => {
+  const st = chats.get(key);
+  return st && !st.chat.closed ? (st.pending.size ? 'needs-ok' : st.chat.busy ? 'working' : 'idle') : 'idle';
+};
+function threadList(name) {
+  const pt = projectThreads(name);
+  const repo = config.projects[name];
+  const active = (pt.list.find((t) => t.id === pt.active) || pt.list[0]).id;
+  return {
+    active,
+    list: pt.list.map((t) => {
+      const key = chatKey(name, t.id);
+      const saved = chats.get(key) || readChat(key);
+      const first = (saved.items || []).find((i) => i.kind === 'user');
+      let updated = t.created || 0;
+      try { updated = fs.statSync(chatFile(key)).mtimeMs; } catch {}
+      return {
+        id: t.id,
+        key,
+        title: t.title || (first ? first.text.replace(/<vibenote-context>[\s\S]*?<\/vibenote-context>\s*/, '').replace(/\s+/g, ' ').trim().slice(0, 60) : '') || 'New chat',
+        scope: saved.cwd && repo && saved.cwd !== repo ? path.relative(repo, saved.cwd) : '',
+        empty: !first,
+        model: t.model || '',
+        status: chatStatus(key),
+        updated,
+      };
+    }),
+  };
+}
+const repoCache = new Map(); // workspace folder → { at, repos }
+async function workspaceRepos(folder) {
+  if (!folder) return [];
+  const hit = repoCache.get(folder);
+  if (hit && Date.now() - hit.at < 60e3) return hit.repos;
+  const repos = (await projects.findRepos(folder)).map((r) => ({ ...r, hasGuide: fs.existsSync(path.join(r.path, 'CLAUDE.md')) || fs.existsSync(path.join(r.path, '.claude', 'CLAUDE.md')) }));
+  repoCache.set(folder, { at: Date.now(), repos });
+  return repos;
+}
+async function readBrief(name) {
+  try {
+    const { meta, body } = parseNote(await fsp.readFile(path.join(rootDir(), name, projects.BRIEF), 'utf8'));
+    return { meta, body, sources: projects.parseSources(meta.extra) };
+  } catch {
+    return null;
+  }
+}
+// What a project's chats are told up front: its repositories, its outside documents, and the brief.
+async function promptInfo(project, cwd) {
+  const [repos, brief] = await Promise.all([workspaceRepos(project.repo), readBrief(project.name)]);
+  const text = (brief?.body || '').trim();
+  return { repos, cwd, sources: brief?.sources || [], brief: text && text !== projects.BRIEF_TEMPLATE.trim() ? text.slice(0, 6000) : '' };
+}
+
+ipcMain.handle('agent:threads', async (_e, notebook) => {
+  const project = projectFor(notebook);
+  return { name: project.name, ...threadList(project.name), repos: (await workspaceRepos(project.repo)).filter((r) => r.rel) };
+});
+ipcMain.handle('agent:thread-new', (_e, notebook, opts = {}) => {
+  const project = projectFor(notebook);
+  const pt = projectThreads(project.name);
+  // reuse an untouched empty chat with the same focus instead of piling up blanks
+  const cwd = opts.cwd && project.repo && (opts.cwd === project.repo || String(opts.cwd).startsWith(project.repo + path.sep)) && fs.existsSync(opts.cwd) ? String(opts.cwd) : null;
+  const focus = cwd && cwd !== project.repo ? cwd : undefined;
+  const blank = pt.list.find((t) => { const c = chats.get(chatKey(project.name, t.id)) || readChat(chatKey(project.name, t.id)); return !(c.items || []).length && !c.sessionId && (c.cwd || undefined) === focus; });
+  const id = blank ? blank.id : `t${Date.now().toString(36)}`;
+  if (!blank) {
+    pt.list.push({ id, title: opts.title ? String(opts.title).slice(0, 60) : '', created: Date.now() });
+    writeChat(chatKey(project.name, id), { sessionId: null, cwd: focus, items: [] });
+  }
+  pt.active = id;
+  saveThreads();
+  return { id, key: chatKey(project.name, id) };
+});
+ipcMain.handle('agent:thread-select', (_e, notebook, id) => {
+  const project = projectFor(notebook);
+  const pt = projectThreads(project.name);
+  if (pt.list.some((t) => t.id === id)) { pt.active = id; saveThreads(); }
+});
+ipcMain.handle('agent:thread-rename', (_e, notebook, id, title) => {
+  const th = projectThreads(projectFor(notebook).name).list.find((t) => t.id === id);
+  if (th) { th.title = String(title || '').replace(/\s+/g, ' ').trim().slice(0, 60); saveThreads(); }
+});
+ipcMain.handle('agent:thread-delete', (_e, notebook, id) => {
+  const project = projectFor(notebook);
+  const pt = projectThreads(project.name);
+  const key = chatKey(project.name, id);
+  const st = chats.get(key);
+  if (st) { st.chat.close(); chats.delete(key); }
+  try { fs.unlinkSync(chatFile(key)); } catch {}
+  pt.list = pt.list.filter((t) => t.id !== id);
+  if (!pt.list.length) pt.list.push({ id: '', title: '', created: 0 });
+  if (!pt.list.some((t) => t.id === pt.active)) pt.active = pt.list[pt.list.length - 1].id;
+  saveThreads();
+});
+
+// ---------- diagrams (draw.io files, edited in the bundled draw.io editor) ----------
+const DRAWIO_DIR = path.join(__dirname, 'dist', 'drawio');
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.gif': 'image/gif', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.xml': 'text/xml; charset=utf-8', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.wasm': 'application/wasm' };
+// draw.io loads js/PostConfig.js last, as its place for local adjustments. Ours: with outside services off
+// (stealth) the editor swaps in a cramped "More Shapes" window; use the full one, which needs nothing from outside.
+const DRAWIO_PATCH = `
+;(function () {
+  if (typeof Menus === 'undefined' || typeof MoreShapesDialog === 'undefined') return;
+  var init = Menus.prototype.init;
+  Menus.prototype.init = function () {
+    init.apply(this, arguments);
+    var ui = this.editorUi;
+    ui.actions.put('shapes', new Action('moreShapes...', function () {
+      ui.showDialog(new MoreShapesDialog(ui, true).container, 680, 480, true, true);
+    }));
+  };
+})();
+`;
+function serveDrawio() {
+  protocol.handle('vibe-drawio', async (req) => {
+    const rel = decodeURIComponent(new URL(req.url).pathname).replace(/^\/+/, '') || 'index.html';
+    const file = path.resolve(DRAWIO_DIR, rel);
+    if (!file.startsWith(DRAWIO_DIR + path.sep)) return new Response('forbidden', { status: 403 });
+    try {
+      const ext = path.extname(file).toLowerCase();
+      const headers = { 'content-type': MIME[ext] || 'application/octet-stream' };
+      // The editor may only load its own bundled files: nothing in a diagram can be sent anywhere.
+      if (ext === '.html') headers['content-security-policy'] = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' data: blob:; form-action 'none'";
+      const data = await fsp.readFile(file);
+      return new Response(rel === 'js/PostConfig.js' ? Buffer.concat([data, Buffer.from(DRAWIO_PATCH)]) : data, { headers });
+    } catch {
+      return new Response('not found', { status: 404 });
+    }
+  });
+}
+const EMPTY_DIAGRAM = '<mxfile host="VibeNote"><diagram name="Page-1" id="page-1"><mxGraphModel dx="1000" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>\n';
+const isDiagram = (f) => /\.drawio$/i.test(f);
+// A diagram may be opened if it is in the notes folder, in a project's code folder, or was picked by the user.
+function diagramFile(p) {
+  const file = path.resolve(String(p || ''));
+  if (!isDiagram(file)) throw new Error('Not a .drawio file.');
+  const inside = (dir) => !!dir && file.startsWith(path.resolve(dir) + path.sep);
+  if (inside(rootDir()) || Object.values(config.projects).some(inside) || (config.recentDiagrams || []).includes(file)) return file;
+  throw new Error('This diagram is outside your notes and project folders. Use “Open Diagram File…” to open it.');
+}
+const diagramWatch = new Map(); // window id → { file, onChange }
+const diagramWrote = new Map(); // file → mtime of our own last save (so we don't report it as an outside change)
+const diagramBackedUp = new Set();
+function unwatchDiagram(id) {
+  const w = diagramWatch.get(id);
+  if (w) { fs.unwatchFile(w.file, w.onChange); diagramWatch.delete(id); }
+}
+ipcMain.handle('diagrams:available', () => fs.existsSync(path.join(DRAWIO_DIR, 'index.html')));
+ipcMain.handle('diagrams:list', async () => {
+  const found = await projects.findFiles(rootDir(), /\.drawio$/i, 6, 300);
+  const stat = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
+  return {
+    notes: found.map((f) => ({ path: f, name: path.basename(f).replace(/\.drawio$/i, ''), notebook: path.relative(rootDir(), path.dirname(f)).split(path.sep).join('/'), mtime: stat(f) })),
+    recent: (config.recentDiagrams || []).filter((f) => fs.existsSync(f)).map((f) => ({ path: f, name: path.basename(f).replace(/\.drawio$/i, ''), folder: path.dirname(f), mtime: stat(f) })),
+  };
+});
+ipcMain.handle('diagrams:new', async (_e, notebook, title) => {
+  const dir = notebookDir(String(notebook || ''));
+  await fsp.mkdir(dir, { recursive: true });
+  const file = uniquePath(dir, safeName(title || 'Untitled diagram'), null, '.drawio');
+  await fsp.writeFile(file, EMPTY_DIAGRAM, { flag: 'wx' });
+  return file;
+});
+ipcMain.handle('diagrams:pick', async (e) => {
+  const r = await dialog.showOpenDialog(winOf(e), { title: 'Open a draw.io diagram', properties: ['openFile'], filters: [{ name: 'draw.io diagrams', extensions: ['drawio'] }] });
+  if (r.canceled || !r.filePaths[0] || !isDiagram(r.filePaths[0])) return null;
+  const file = path.resolve(r.filePaths[0]);
+  config.recentDiagrams = [file, ...(config.recentDiagrams || []).filter((x) => x !== file)].slice(0, 12);
+  saveConfig();
+  return file;
+});
+// Delete = move to the macOS Trash (recoverable from Finder), and forget it in the recent list.
+ipcMain.handle('diagrams:delete', async (e, p) => {
+  const file = diagramFile(p);
+  unwatchDiagram(e.sender.id);
+  await shell.trashItem(file);
+  config.recentDiagrams = (config.recentDiagrams || []).filter((x) => x !== file);
+  saveConfig();
+  return true;
+});
+ipcMain.handle('diagrams:forget', (_e, p) => {
+  config.recentDiagrams = (config.recentDiagrams || []).filter((x) => x !== path.resolve(String(p)));
+  saveConfig();
+});
+ipcMain.handle('diagrams:read', async (e, p) => {
+  const file = diagramFile(p);
+  const st = await fsp.stat(file);
+  if (st.size > 30e6) throw new Error('This diagram is too big to open here.');
+  const xml = await fsp.readFile(file, 'utf8');
+  const wc = e.sender;
+  unwatchDiagram(wc.id);
+  const onChange = (cur) => {
+    if (wc.isDestroyed()) return unwatchDiagram(wc.id);
+    if (cur.mtimeMs && cur.mtimeMs !== diagramWrote.get(file)) wc.send('diagram:changed', file);
+  };
+  fs.watchFile(file, { interval: 700 }, onChange);
+  diagramWatch.set(wc.id, { file, onChange });
+  return { xml, mtime: st.mtimeMs };
+});
+ipcMain.handle('diagrams:write', async (_e, p, xml) => {
+  const file = diagramFile(p);
+  xml = String(xml || '');
+  if (!/<mxfile[\s>]|<mxGraphModel[\s>]/.test(xml)) throw new Error('That does not look like a draw.io diagram.');
+  // keep the file as it was before the first change of this session (newest 10 kept per diagram)
+  if (!diagramBackedUp.has(file) && fs.existsSync(file)) {
+    diagramBackedUp.add(file);
+    const dir = path.join(app.getPath('userData'), 'diagram-backups');
+    await fsp.mkdir(dir, { recursive: true });
+    const base = path.basename(file, '.drawio');
+    await fsp.copyFile(file, path.join(dir, `${base}.${Date.now()}.drawio`)).catch(() => {});
+    const old = (await fsp.readdir(dir)).filter((f) => f.startsWith(base + '.') && f.endsWith('.drawio')).sort().reverse().slice(10);
+    for (const f of old) await fsp.unlink(path.join(dir, f)).catch(() => {});
+  }
+  await fsp.writeFile(file, xml, 'utf8');
+  const st = await fsp.stat(file);
+  diagramWrote.set(file, st.mtimeMs);
+  return st.mtimeMs;
+});
+ipcMain.handle('diagrams:close', (e) => unwatchDiagram(e.sender.id));
+ipcMain.handle('diagrams:open-external', (_e, p) => shell.openPath(diagramFile(p)));
+ipcMain.handle('diagrams:reveal', (_e, p) => shell.showItemInFolder(diagramFile(p)));
+
+// ---------- code review: read-only views of a project's repositories (changes, commits, files) ----------
+const insideProjectFolder = (p) => Object.values(config.projects).some((root) => root && (p === path.resolve(root) || p.startsWith(path.resolve(root) + path.sep)));
+function repoDir(p) {
+  const dir = path.resolve(String(p || ''));
+  if (!insideProjectFolder(dir) || !fs.existsSync(path.join(dir, '.git'))) throw new Error('Not a repository of a linked project.');
+  return dir;
+}
+// A file Claude or the user may look at here: inside a linked code folder or the notes folder.
+function codeFile(p) {
+  const file = path.resolve(String(p || ''));
+  if (!insideProjectFolder(file) && !file.startsWith(rootDir() + path.sep)) throw new Error('That file is outside your project folders.');
+  return file;
+}
+const DIFF_FLAGS = ['--no-color', '--no-ext-diff', '--no-textconv', '-M', '--unified=3'];
+const looksBinary = (buf) => buf.subarray(0, 8000).includes(0);
+
+ipcMain.handle('code:repos', async (_e, notebook) => {
+  const project = projectFor(notebook);
+  const repos = await workspaceRepos(project.repo);
+  const st = chats.get(project.key) || readChat(project.key);
+  const focus = st.cwd || project.repo || null;
+  const out = await Promise.all(repos.map(async (r) => {
+    const s = await projects.git(r.path, ['status', '--porcelain']);
+    return { name: r.name, path: r.path, rel: r.rel, changed: s == null ? 0 : s.split('\n').filter(Boolean).length };
+  }));
+  // the repository the open chat is focused on comes first; otherwise one that has changes
+  const pick = out.find((r) => r.path === focus) || out.find((r) => r.changed) || out[0] || null;
+  return { project: project.name, repos: out, current: pick?.path || null };
+});
+ipcMain.handle('code:log', async (_e, repo) => {
+  const out = await projects.git(repoDir(repo), ['log', '-25', '--format=%h%x1f%s%x1f%ct%x1f%an']);
+  return (out || '').split('\n').filter(Boolean).map((l) => { const [hash, subject, at, author] = l.split('\x1f'); return { hash, subject, at: Number(at) * 1000, author }; });
+});
+// commit: a short/long hash, or empty for what is not committed yet (including new files).
+ipcMain.handle('code:diff', async (_e, repo, commit) => {
+  const dir = repoDir(repo);
+  const MAX = 24 * 1024 * 1024;
+  if (commit) {
+    if (!/^[0-9a-f]{4,40}$/i.test(String(commit))) throw new Error('Bad commit id.');
+    const diff = await projects.git(dir, ['show', String(commit), '--format=', ...DIFF_FLAGS], 15000, MAX);
+    if (diff == null) throw new Error('Could not read that commit.');
+    return { diff, untracked: [] };
+  }
+  let diff = await projects.git(dir, ['diff', 'HEAD', ...DIFF_FLAGS], 15000, MAX);
+  if (diff == null) diff = await projects.git(dir, ['diff', ...DIFF_FLAGS], 15000, MAX); // a repository with no commit yet
+  if (diff == null) throw new Error('Could not read the changes (is git installed?).');
+  const names = ((await projects.git(dir, ['ls-files', '--others', '--exclude-standard', '-z'])) || '').split('\0').filter(Boolean);
+  const untracked = [];
+  for (const rel of names.slice(0, 40)) {
+    try {
+      const f = path.join(dir, rel);
+      const st = await fsp.stat(f);
+      if (!st.isFile()) continue;
+      const buf = st.size <= 300000 ? await fsp.readFile(f) : null;
+      untracked.push({ path: rel, text: buf && !looksBinary(buf) ? buf.toString('utf8') : null, size: st.size });
+    } catch {}
+  }
+  return { diff, untracked, moreUntracked: Math.max(0, names.length - 40) };
+});
+ipcMain.handle('code:read', async (_e, p) => {
+  const file = codeFile(p);
+  const st = await fsp.stat(file);
+  if (!st.isFile()) throw new Error('Not a file.');
+  if (st.size > 1.5e6) throw new Error('This file is too big to show here. Open it in your editor.');
+  const buf = await fsp.readFile(file);
+  if (looksBinary(buf)) throw new Error('This is not a text file.');
+  return { path: file, text: buf.toString('utf8') };
+});
+// A path mentioned in a chat ("src/app.js:42") → the real file, looked for in the chat's folder and the project's repositories.
+ipcMain.handle('code:resolve', async (_e, notebook, rel) => {
+  const project = projectFor(notebook);
+  const st = chats.get(project.key) || readChat(project.key);
+  const name = String(rel || '').replace(/^\.\//, '');
+  if (!name) return null;
+  const bases = [st.cwd, project.repo, ...(await workspaceRepos(project.repo)).map((r) => r.path), rootDir()].filter(Boolean);
+  const tries = path.isAbsolute(name) ? [name] : bases.map((b) => path.join(b, name));
+  for (const t of tries) {
+    try { const f = codeFile(t); if (fs.statSync(f).isFile()) return f; } catch {}
+  }
+  return null;
+});
+ipcMain.handle('code:open-editor', (_e, p, line) => {
+  const file = codeFile(p);
+  // VS Code's link format; if VS Code isn't installed, fall back to whatever app opens this kind of file
+  if (fs.existsSync('/Applications/Visual Studio Code.app')) return shell.openExternal(`vscode://file${encodeURI(file)}${Number(line) > 0 ? `:${Number(line)}` : ''}`);
+  return shell.openPath(file);
+});
+ipcMain.handle('code:reveal', (_e, p) => shell.showItemInFolder(codeFile(p)));
+
+// ---------- projects (spec: docs/workspace-spec.md) ----------
+async function listProjectsInfo() {
+  const root = rootDir();
+  let ents = [];
+  try { ents = await fsp.readdir(root, { withFileTypes: true }); } catch {}
+  const out = [];
+  for (const e of ents) {
+    if (!e.isDirectory() || e.name.startsWith('.') || !isProjectName(e.name)) continue;
+    const linked = config.projects[e.name] || null;
+    const brief = await readBrief(e.name);
+    out.push({ name: e.name, repo: linked, repoMissing: !!linked && !fs.existsSync(linked), hasBrief: !!brief, sources: brief?.sources || [] });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+ipcMain.handle('projects:list', () => listProjectsInfo());
+
+async function ensureBrief(name) {
+  const dir = notebookDir(name);
+  await fsp.mkdir(dir, { recursive: true });
+  const file = path.join(dir, projects.BRIEF);
+  if (!fs.existsSync(file)) await fsp.writeFile(file, serializeNote({ tags: ['project'] }, projects.BRIEF_TEMPLATE, baseOf(file)), { flag: 'wx' });
+  return file;
+}
+ipcMain.handle('projects:create', async (_e, name) => {
+  const clean = safeName(name);
+  if (!clean || clean.includes('/')) throw new Error('Give the project a name.');
+  return { name: clean, brief: await ensureBrief(clean) };
+});
+
+ipcMain.handle('projects:set-sources', async (_e, name, list) => {
+  const file = await ensureBrief(String(name));
+  const { meta, body } = parseNote(await fsp.readFile(file, 'utf8'));
+  const clean = [];
+  for (const s of Array.isArray(list) ? list : []) { try { inRoot(String(s)); clean.push(String(s)); } catch {} }
+  meta.extra = projects.setSources(meta.extra, clean);
+  await fsp.writeFile(file, serializeNote(meta, body, baseOf(file)), 'utf8');
+  // idle chats restart on their next message, so they learn the new document list (busy ones are left alone)
+  for (const [key, st] of chats) {
+    if ((key === name || key.startsWith(name + '#')) && !st.chat.busy) { st.chat.close(); chats.delete(key); }
+  }
+  return projects.parseSources(meta.extra);
+});
+
+// Everything the project home page shows that the notes list doesn't already know.
+ipcMain.handle('projects:home', async (_e, name, markSeen) => {
+  name = String(name || '');
+  if (!isProjectName(name)) return null;
+  const project = projectFor(name);
+  config.projectSeen ||= {};
+  const seenAt = config.projectSeen[name] || 0;
+  const [brief, found] = await Promise.all([readBrief(name), workspaceRepos(project.repo)]);
+  const repos = await Promise.all(found.map((r) => projects.repoInfo(r, seenAt)));
+  let past = [];
+  if (project.repo) {
+    try { past = (await claudeChats.listChats(project.repo, true)).slice(0, 8); } catch {}
+  }
+  if (markSeen) { config.projectSeen[name] = Date.now(); saveConfig(); }
+  const text = (brief?.body || '').trim();
+  return {
+    name,
+    repo: config.projects[name] || null,
+    repoMissing: !!config.projects[name] && !project.repo,
+    briefPath: brief ? path.join(rootDir(), name, projects.BRIEF) : null,
+    brief: text === projects.BRIEF_TEMPLATE.trim() ? '' : text.slice(0, 4000),
+    sources: brief?.sources || [],
+    repos,
+    past,
+    diagrams: project.repo ? (await projects.findFiles(project.repo, /\.drawio$/i, 4, 40)).map((f) => ({ path: f, name: path.basename(f).replace(/\.drawio$/i, ''), rel: path.relative(project.repo, f) })) : [],
+    threads: threadList(name),
+    seenAt,
+  };
+});
+ipcMain.handle('projects:reveal', (_e, p) => { if (fs.existsSync(String(p))) shell.openPath(String(p)); });
+
 // ---------- Claude Chats window: past Claude Code chats (read-only), continue one, save one as a note ----------
 const headOf = async (f, n = 600) => {
   const fh = await fsp.open(f, 'r').catch(() => null);
@@ -1127,9 +1625,15 @@ ipcMain.handle('chats:continue', async (_e, { cwd, id, createNotebook }) => {
     config.projects[key] = cwd;
     saveConfig();
   }
-  const st = chats.get(key);
-  if (st) { st.chat.close(); chats.delete(key); }
   const repo = config.projects[key];
+  // A continued chat becomes one more chat of the project (the chat that was open stays as it is).
+  const pt = projectThreads(key);
+  const tid = `t${Date.now().toString(36)}`;
+  pt.list.push({ id: tid, title: String(meta.title || 'Continued chat').replace(/\s+/g, ' ').slice(0, 60), created: Date.now() });
+  pt.active = tid;
+  saveThreads();
+  const notebookKey = key;
+  key = chatKey(key, tid);
   if (meta.source === 't3') {
     // No Claude Code chat behind it: start a new chat that gets this conversation as background.
     writeChat(key, {
@@ -1138,7 +1642,7 @@ ipcMain.handle('chats:continue', async (_e, { cwd, id, createNotebook }) => {
       background: claudeChats.asBackground(chat),
       items: [...items.filter((i) => i.kind !== 'note').map(({ at, ...i }) => i), { kind: 'note', text: 'Continuing from a T3 Code thread — Claude gets this conversation as background with your first message' }],
     });
-    return { key, background: true };
+    return { key: notebookKey, background: true };
   }
   writeChat(key, {
     sessionId: meta.id,
@@ -1146,7 +1650,7 @@ ipcMain.handle('chats:continue', async (_e, { cwd, id, createNotebook }) => {
     cwd: folder !== repo ? folder : undefined,
     items: [...items.filter((i) => i.kind !== 'note').map(({ at, ...i }) => i), { kind: 'note', text: 'Continued from a past chat — new messages go to a copy; the original is unchanged' }],
   });
-  return { key };
+  return { key: notebookKey };
 });
 
 // Save a chat as a Markdown note (updates the note if this chat was saved before).
@@ -1441,7 +1945,7 @@ function panelChat(notePath, max = 16000) {
   const project = projectFor(nb);
   const state = chats.get(project.key) || readChat(project.key);
   const msgs = (state.items || []).filter((i) => (i.kind === 'user' || i.kind === 'text') && i.text?.trim());
-  if (!msgs.length) return { messages: 0, project: project.key || nb || '', text: '' };
+  if (!msgs.length) return { messages: 0, project: project.name || nb || '', text: '' };
   const out = [];
   let size = 0;
   for (let i = msgs.length - 1; i >= 0 && size < max; i--) {
@@ -1454,8 +1958,8 @@ function panelChat(notePath, max = 16000) {
   const skipped = msgs.length - out.length;
   return {
     messages: msgs.length,
-    project: project.key || nb || '',
-    text: `<claude_panel_chat project=${JSON.stringify(project.key || nb || 'notes')}>\n${skipped > 0 ? `(${skipped} earlier messages left out)\n\n` : ''}${out.join('\n\n')}\n</claude_panel_chat>`,
+    project: project.name || nb || '',
+    text: `<claude_panel_chat project=${JSON.stringify(project.name || nb || 'notes')}>\n${skipped > 0 ? `(${skipped} earlier messages left out)\n\n` : ''}${out.join('\n\n')}\n</claude_panel_chat>`,
   };
 }
 ipcMain.handle('chat:excerpt-info', (_e, notePath) => {
@@ -1871,6 +2375,7 @@ function buildMenu() {
         item('Toggle Sidebar', 'toggle-sidebar', 'CmdOrCtrl+\\'),
         item('Focus Mode', 'focus-mode', 'CmdOrCtrl+Shift+Enter'),
         item('Claude Panel', 'toggle-agent', 'CmdOrCtrl+J'),
+        item('Coding Layout', 'coding-layout', 'CmdOrCtrl+Alt+J'),
         item('Comments', 'toggle-comments', 'CmdOrCtrl+Shift+M'),
         {
           label: 'Sort Notes By',
@@ -1888,9 +2393,63 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu' },
+    { role: 'help', submenu: [item('VibeNote Guide', 'open-guide')] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
+
+// ---------- the built-in "VibeNote Guide" project ----------
+// Notes shipped in guide/ are copied into <notes>/VibeNote Guide (a project: it has a "Project brief" note).
+// A guide note you never edited is refreshed when the shipped one changes; a note you edited is kept as yours.
+// Deleting the guide (or one of its notes) is respected; Help → VibeNote Guide brings it back.
+const GUIDE_NAME = 'VibeNote Guide';
+async function syncGuide(force = false) {
+  const src = path.join(__dirname, 'guide');
+  if (!fs.existsSync(src)) return null;
+  const dest = path.join(rootDir(), GUIDE_NAME);
+  config.guides ||= {};
+  const g = config.guides[rootDir()] || { files: {} };
+  if (!force && g.created && !fs.existsSync(dest)) return null; // removed on purpose
+  await fsp.mkdir(dest, { recursive: true });
+  const hash = (s) => require('crypto').createHash('sha1').update(s).digest('hex');
+  // Same text apart from line endings / the final newline (VibeNote's own save may drop it) counts as unchanged.
+  const same = (text, h) => !!h && [text, text.trimEnd(), text.trimEnd() + '\n', text.replace(/\r\n/g, '\n').trimEnd() + '\n'].some((t) => hash(t) === h);
+  const untouched = (f) => { try { return same(fs.readFileSync(f, 'utf8'), g.files[path.basename(f)]); } catch { return false; } };
+  for (const f of (await fsp.readdir(src)).filter((x) => x.endsWith('.md'))) {
+    const shipped = await fsp.readFile(path.join(src, f), 'utf8');
+    const target = path.join(dest, f);
+    const known = g.files[f];
+    if (!fs.existsSync(target)) {
+      if (known && !force) continue; // you deleted this one
+      await fsp.writeFile(target, shipped);
+      g.files[f] = hash(shipped);
+      continue;
+    }
+    const currentText = await fsp.readFile(target, 'utf8');
+    if (same(currentText, hash(shipped))) { g.files[f] = hash(shipped); continue; }
+    if (known && same(currentText, known)) { // untouched since we wrote it: update it
+      await snapshot(target, true, 'Before guide update').catch(() => {});
+      await fsp.writeFile(target, shipped);
+      g.files[f] = hash(shipped);
+    }
+  }
+  // Lists sort newest first: stamp freshly written guide notes so they read in order (brief, 1, 2, … 10).
+  const files = (await fsp.readdir(dest)).filter((x) => g.files[x] && x.endsWith('.md'));
+  const rank = (f) => (f === 'Project brief.md' ? -1 : parseInt(f, 10) || 99);
+  const base = Date.now() / 1000;
+  for (const f of files.sort((a, b) => rank(a) - rank(b))) {
+    const full = path.join(dest, f);
+    if (!untouched(full) || (fs.statSync(full).mtimeMs < (g.stampedAt || 0))) continue; // edited or already ordered
+    const t = base - (rank(f) + 2) * 60;
+    await fsp.utimes(full, t, t).catch(() => {});
+  }
+  g.stampedAt = Date.now();
+  g.created = true;
+  config.guides[rootDir()] = g;
+  saveConfig();
+  return GUIDE_NAME;
+}
+ipcMain.handle('guide:open', () => syncGuide(true));
 
 app.setName('VibeNote');
 app.on('before-quit', () => { quitting = true; });
@@ -1903,7 +2462,9 @@ app.whenReady().then(async () => {
     await fsp.mkdir(path.join(rootDir(), 'Ideas'), { recursive: true });
     await fsp.writeFile(path.join(rootDir(), 'Welcome to VibeNote.md'), fs.readFileSync(path.join(__dirname, 'welcome.md'), 'utf8'));
   }
+  await syncGuide().catch((e) => console.warn('guide:', e.message));
   buildMenu();
+  serveDrawio();
   createWindow();
   watchRoot();
   app.on('activate', () => {

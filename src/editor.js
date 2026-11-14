@@ -42,7 +42,7 @@ const commentField = StateField.define({
 });
 
 const v = (name) => `var(${name})`;
-const highlight = HighlightStyle.define([
+export const highlight = HighlightStyle.define([
   // Markdown
   { tag: t.heading1, fontSize: '1.4em', fontWeight: '700', color: v('--md-heading') },
   { tag: t.heading2, fontSize: '1.22em', fontWeight: '700', color: v('--md-heading') },
@@ -69,7 +69,7 @@ const highlight = HighlightStyle.define([
   { tag: t.invalid, color: '#ef4444' },
 ]);
 
-const theme = EditorView.theme({
+export const theme = EditorView.theme({
   '&': { height: '100%', backgroundColor: 'transparent', color: 'var(--text)' },
   '.cm-scroller': { fontFamily: 'var(--editor-font)', fontSize: 'var(--editor-size)', lineHeight: '1.6' },
   '.cm-content': { maxWidth: 'var(--line-width)', margin: '0', padding: '14px 24px 40vh', caretColor: 'var(--accent)' },
@@ -97,7 +97,7 @@ const theme = EditorView.theme({
   '.cm-completionDetail': { marginLeft: '12px', opacity: '0.6', fontStyle: 'normal' },
 });
 
-const TASK_RE = /^((?:\s*>)*\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])\]/;
+const TASK_RE = /^((?:\s*>)*\s*(?:(?:[-*+]|\d+[.)])\s+\[|\[(?=[ xX]\][ \t]+\S)))([ xX])\]/; // "- [ ]", or a bare "[ ] text" line (src/bare-tasks.js)
 const URL_RE = /^https?:\/\/[^\s<>"]+$/;
 
 export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClick, onPasteUrl, getTitles, getFragments = () => [], onSelection, onCommentClick, suggest }) {
@@ -108,17 +108,21 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
   const langExt = () => (lang === 'yaml' || lang === 'json'
     ? [lang === 'yaml' ? yaml() : json(), autocompletion({ override: [slashClaudeOnly], icons: false })]
     : [
-      markdown({ base: markdownLanguage, codeLanguages: languages }), listMarkers, EditorView.lineWrapping, typingKeymap,
+      // no "setext" headings (text with a line of - or = under it), same as the preview
+      markdown({ base: markdownLanguage, codeLanguages: languages, extensions: { remove: ['SetextHeading'] } }), listMarkers, EditorView.lineWrapping, typingKeymap,
       autocompletion({ override: [wikiComplete, slashComplete, emojiComplete, fenceComplete], icons: false }),
     ]);
   let settings = {};
   let readOnly = false;
   let silent = false;
 
-  // [[ → suggest note titles
-  const KIND_LABEL = { api: 'API spec', confluence: 'Confluence', note: '' };
+  // [[ → everything you can link to: projects, notes, Confluence pages, API specs, diagrams (grouped in sections)
+  const SECTIONS = {
+    project: { name: 'Projects', rank: 0 }, note: { name: 'Notes', rank: 1 }, confluence: { name: 'Confluence pages', rank: 2 },
+    api: { name: 'API specs', rank: 3 }, diagram: { name: 'Diagrams', rank: 4 },
+  };
   const wikiComplete = (ctx) => {
-    const m = ctx.matchBefore(/\[\[[^\]\n]*/);
+    const m = ctx.matchBefore(/\[\[(?:[^\]\n]|\](?!\]))*/);
     if (!m) return null;
     const typed = m.text.slice(2);
     const hash = typed.indexOf('#');
@@ -141,13 +145,14 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
     }
     return {
       from: m.from + 2,
-      options: getTitles().map(({ title, kind }) => ({
+      options: getTitles().map(({ title, kind, insert: ins, where }) => ({
         label: title,
-        detail: KIND_LABEL[kind] || '',
-        type: 'note',
+        detail: where || '',
+        type: kind === 'project' ? 'class' : kind === 'diagram' ? 'constant' : 'note',
+        section: SECTIONS[kind] || SECTIONS.note,
         apply: (view, _c, from, to) => {
           const end = view.state.sliceDoc(to, to + 2) === ']]' ? to + 2 : to;
-          const insert = title + ']]';
+          const insert = (ins || title) + ']]';
           view.dispatch({ changes: { from, to: end, insert }, selection: { anchor: from + insert.length } });
         },
       })),
@@ -213,7 +218,7 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
           return false;
         };
         return (
-          (onLinkClick && hit(/\[\[([^\]\n|]+)(?:\|[^\]\n]+)?\]\]/g, (m) => onLinkClick(m[1].trim()))) ||
+          (onLinkClick && hit(/\[\[([^\n|]+?)(?:\|[^\n]+?)?\]\](?!\])/g, (m) => onLinkClick(m[1].trim()))) ||
           hit(/https?:\/\/[^\s<>()"\]]+/g, (m) => window.open(m[0], '_blank'))
         );
       },

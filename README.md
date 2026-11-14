@@ -8,8 +8,9 @@ Built with Electron. Personal project; macOS only.
 
 | Version | What it has | Where |
 |---|---|---|
-| **Stable** | Notes, the Claude panel, Confluence, API specs | branch `main`, tags `v*-stable` (newest: `v1.1.0-stable`) |
-| **Experimental** | Everything in stable, plus Projects, the coding layout and draw.io diagrams | branch `agent` |
+| **Stable** | Notes, the Claude panel, Confluence, API specs, Projects, the coding layout and draw.io diagrams | branch `main`, tags `v*-stable` (newest: `v1.2.0-stable`) |
+| **Experimental** | Everything in stable, plus whatever is being tried next | branch `agent` |
+| Before Projects | Notes, the Claude panel, Confluence, API specs | tag `v1.1.0-stable` |
 | Notes only | The Markdown app before the Claude panel | tag `v1.0.2-stable` |
 
 Install any version into /Applications (notes and settings are not touched):
@@ -60,7 +61,7 @@ It runs on **your installed [Claude Code](https://claude.com/claude-code)** and 
 
 - **Projects**: a project is a notebook that gathers documents (its notes, plus Confluence pages, API specs or other notebooks you tick), a code folder with one or many repositories, and several Claude chats. Its **home page** shows what changed since you last looked, a **brief** that every new chat reads first, the documents, the repositories (branch, last commit, uncommitted files) and the chats.
 - **Several chats per project**: switch between them in the panel; each can be focused on one repository and has its own model and permission mode; they keep working in the background and show when one needs your OK.
-- **Coding layout** (⇧⌘J): the chat in the middle with the code or document beside it. **Changes** shows what is not committed yet, or any recent commit, as a diff. Click a line to comment and send your comments to Claude as one review. A read-only **file viewer** opens files Claude mentions, with **Open in VS Code**.
+- **Coding layout** (⌥⌘J): the chat in the middle with the code or document beside it. **Changes** shows what is not committed yet, or any recent commit, as a diff. Click a line to comment and send your comments to Claude as one review. A read-only **file viewer** opens files Claude mentions, with **Open in VS Code**.
 - **Diagrams**: `.drawio` files open in the full draw.io editor inside the app. It saves as you draw and refreshes when Claude edits the file. The editor is bundled and cannot contact anything outside the app.
 
 Specs and backlog: `docs/workspace-spec.md`, `docs/ideas.md`.
@@ -136,6 +137,7 @@ The notes folder is self-contained, so it can be synced between Macs (iCloud Dri
 | `build.mjs` | Bundles the renderer and the agent host; downloads and trims the draw.io editor into `dist/drawio` |
 | `styles.css` / `markdown.css` | App styles / preview + export styles |
 | `welcome.md` | Note created on first run |
+| `guide/` | The built-in **VibeNote Guide** project (copied into the notes folder; untouched notes are updated with new versions, edited ones are kept) |
 | `scripts/smoke-test.js` | Launches the app against a throwaway profile and checks the basics |
 | `scripts/install-version.sh` | Builds a given git version and installs it into /Applications (rollback) |
 | `docs/` | Hand-over notes, specs and the backlog |

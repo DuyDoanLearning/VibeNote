@@ -7,6 +7,7 @@
 // images, layouts, merged-cell tables) become ```confluence boxes that always go back unchanged — even if
 // the box is moved or its label edited.
 import { Marked } from 'marked';
+import { bareTasks } from './bare-tasks.js';
 
 // ---------- Confluence HTML → Markdown ----------
 
@@ -315,6 +316,8 @@ export function fromConfluence(html) {
 // ---------- Markdown → Confluence HTML (Push) ----------
 
 const md = new Marked({ gfm: true });
+// No "setext" headings: a line of - or = under text must not turn that text into a heading (only # makes headings).
+md.use({ tokenizer: { lheading() { return undefined; } } });
 md.use({
   renderer: {
     code({ text, lang }) {
@@ -383,12 +386,12 @@ function restoreTable(orig, table, doc) {
 // Markdown (a changed region of the note) → Confluence HTML.
 function convertRegion(text, side, replaced, opts = {}) {
   // [[Title]] / [[Title#Heading|text]] → a link to the Confluence page when it is one, otherwise just the words.
-  text = text.replace(/\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/g, (_m, target, alias) => {
+  text = text.replace(/\[\[([^\n|]+?)(?:\|([^\n]+?))?\]\](?!\])/g, (_m, target, alias) => {
     const label = (alias || target.replace(/\s*#\s*/, ' › ')).trim().replace(/[[\]]/g, '');
     const url = opts.resolveLink?.(target.trim());
     return url ? `[${label}](<${url}>)` : label;
   });
-  const html = md.parse(text);
+  const html = md.parse(bareTasks(text));
   const doc = new DOMParser().parseFromString(`<!doctype html><body>${html}</body>`, 'text/html');
   const body = doc.body;
   const problems = [];

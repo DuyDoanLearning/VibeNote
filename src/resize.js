@@ -7,6 +7,7 @@ const EDGES = [
   { key: 'list', host: '#list', side: 'right', cssVar: '--list-w', min: 220, max: 600 },
   { key: 'comments', host: '#comments', side: 'left', cssVar: '--comments-w', min: 280, max: 760 },
   { key: 'claude', host: '#agent', side: 'left', cssVar: '--claude-w', min: 300, max: 860 },
+  { key: 'codechat', host: '#agent', side: 'right', cssVar: '--code-chat-w', min: 360, max: 1400 }, // coding layout: the chat is the middle column
   { key: 'split', host: '#editor', side: 'right', split: true },
 ];
 

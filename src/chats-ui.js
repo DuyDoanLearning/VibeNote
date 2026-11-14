@@ -20,7 +20,8 @@ export function createChatsUI(ctx) {
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(d.getFullYear() !== now.getFullYear() && { year: 'numeric' }) });
   };
 
-  async function open() {
+  // target: { cwd, id } opens straight on one chat (e.g. from a project's home page)
+  async function open(target) {
     const ov = overlay('modal-ov');
     ov.innerHTML = `
       <div class="modal chats-win">
@@ -60,7 +61,7 @@ export function createChatsUI(ctx) {
         const o = new Option(`${'   '.repeat(p.depth)}${p.label}${p.notebook ? `  · notebook ${p.notebook}` : ''}`, p.cwd);
         sel.append(o);
       }
-      let pick = r.current;
+      let pick = (target?.cwd && projects.some((p) => p.cwd === target.cwd) && target.cwd) || r.current;
       try { pick ||= localStorage.getItem('vibe.chatsProject'); } catch {}
       sel.value = projects.some((p) => p.cwd === pick) ? pick : projects.filter((p) => !p.isHome).sort((a, b) => b.updated - a.updated)[0]?.cwd || projects[0].cwd;
     } catch (e) {
@@ -237,7 +238,9 @@ export function createChatsUI(ctx) {
     sel.addEventListener('change', () => { openId = null; loadList(); });
     subs.addEventListener('change', loadList);
     search.addEventListener('input', renderList);
+    if (target?.id) subs.checked = true;
     await loadList();
+    if (target?.id && chats.some((x) => x.id === target.id)) show(target.id);
     search.focus();
   }
 

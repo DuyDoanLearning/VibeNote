@@ -26,6 +26,20 @@ Ideas discussed with the owner (2026-11-13), not yet decided or built. Owner's t
 17. **Project memory note** (backlog, 2026-11-13; uses Claude usage): Claude reads a project's past chats and keeps one living note — decisions, architecture choices, open TODOs, things tried that failed — which the Claude panel reads first in every new chat.
 18. **Confluence sync & comments** (parked by owner, 2026-11-13): a Sync button + quiet check every ~15 min that marks pages changed by others ("Updated by X · 2h ago"), Pull all for untouched notes, both-changed pages listed separately; Confluence footer/inline comments in the comments panel (with replies posted to Confluence, 💬 count for new ones). Works only off the office network (proxy). Test first whether one CQL search can check all page versions.
 
+## Projects workspace (spec: `docs/workspace-spec.md`)
+19. **Step 1 — Projects, home page, multi-repo workspace, several chats per project**: built on `agent`, 2026-11-13.
+20. **Step 2 — Draw.io editor** inside VibeNote: built on `agent`, 2026-11-14 (plus a model per chat).
+21. **Step 3 — Coding layout**, changes review with line comments for Claude, file viewer: built on `agent`, 2026-11-14.
+22. **Step 4 — Spec watch**: a followed Confluence page changes → what changed, and which code / API specs it affects.
+23. **Step 5 — Figma → API proposal**: frame beside the API spec editor, Claude drafts endpoints linked to the screen.
+24. **Start coding from a document** (owner's idea, 2026-11-13): a "Build this" button on a spec that opens a chat on the right repository with the document attached (plan → approve → code); possibly hand over to T3 Code instead.
+25. **Distill a chat into a note**; **Trace chats** across upstream/downstream repositories (read-only, saved as a note).
+
+26. **Project memory** (owner, 2026-11-13): a project remembers what was learned and decided across chats.
+27. **Link local folders as context** (owner): attach any folder on the Mac to a project, read-only.
+28. **Codebase memory MCP** (owner): integrate a code-indexing MCP server so every agent in a project grabs codebase context fast when a "coding" task starts.
+29. Diagrams: rename/delete in the app, embed or link diagrams in notes, version history.
+
 ## Fun
 13. "Explain like I'm 5" toggle on explanation notes.
 14. Weekly recap card.

@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/common';
 import katex from 'katex';
 import markedFootnote from 'marked-footnote';
+import { bareTasks } from './bare-tasks.js';
 
 let linkKind = () => 'note'; // target → 'note' | 'confluence' | 'api' | null (missing)
 export function setLinkResolver(fn) { linkKind = fn; }
@@ -19,6 +20,8 @@ function tex(src, displayMode) {
 }
 
 const marked = new Marked({ gfm: true });
+// No "setext" headings: a line of - or = under text must not turn that text into a heading (only # makes headings).
+marked.use({ tokenizer: { lheading() { return undefined; } } }); // undefined (not false) = skip, don't fall back
 marked.use(markedFootnote());
 marked.use({
   extensions: [
@@ -37,8 +40,8 @@ marked.use({
       level: 'inline',
       start: (src) => { const i = src.indexOf('[['); return i < 0 ? undefined : i; },
       tokenizer(src) {
-        const m = /^\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/.exec(src);
-        if (m) return { type: 'wikilink', raw: m[0], target: m[1].trim(), text: m[2] ? m[2].trim() : m[1].trim().replace(/\s*#\s*/, ' › ') };
+        const m = /^\[\[([^\n|]+?)(?:\|([^\n]+?))?\]\](?!\])/.exec(src); // titles may contain [ ]
+        if (m) return { type: 'wikilink', raw: m[0], target: m[1].trim(), text: m[2] ? m[2].trim() : m[1].trim().replace(/^(project|diagram):\s*/i, '').replace(/\s*#\s*/, ' › ') };
       },
       renderer(tok) {
         const kind = linkKind(tok.target);
@@ -70,7 +73,7 @@ marked.use({
 });
 
 export function renderMarkdown(md) {
-  return DOMPurify.sanitize(marked.parse(md), { ADD_ATTR: ['target'] });
+  return DOMPurify.sanitize(marked.parse(bareTasks(md)), { ADD_ATTR: ['target'] });
 }
 
 // ---------- mermaid (loaded lazily; it's big) ----------
