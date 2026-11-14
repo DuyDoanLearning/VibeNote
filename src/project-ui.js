@@ -444,43 +444,125 @@ export function createProjectUI(ctx) {
   }
 
   // ---------- add documents (things that live outside the project's notebook) ----------
+  // "Documents in <project>": a tree per section (Notebooks · Confluence pages · API specs) with short names, folding
+  // branches and a "Selected" strip. Ticking a folder includes everything under it (children show as included).
   function addDocs(name) {
     const p = find(name);
     if (!p) return;
     const picked = new Set(p.sources);
-    const kindIcon = (path) => (path.split('/')[0] === ctx.reserved[0] ? ICON.confluence : path.split('/')[0] === ctx.reserved[1] ? ICON.api : ICON.book);
-    const cands = [
-      ...S.notebooks.filter((n) => n !== name && !n.startsWith(name + '/') && !ctx.reserved.includes(n)).map((n) => ({ value: n, label: n.split('/').join(' / '), icon: kindIcon(n), what: n.split('/')[0] === ctx.reserved[0] ? 'Confluence pages' : 'folder' })),
-      ...live().filter((n) => n.kind === 'api' && !inBook(n, name)).map((n) => ({ value: relOf(n), label: n.title, icon: ICON.api, what: 'API spec' })),
-    ];
-    for (const s of picked) if (!cands.some((c) => c.value === s)) cands.unshift({ value: s, label: s, icon: ICON.book, what: 'missing' });
+    const [CF, APIS] = ctx.reserved;
+    const nodes = new Map(); // value → { value, label, icon, kind, parent, children[], count }
+    const add = (value, label, icon, kind, parent) => {
+      if (!nodes.has(value)) nodes.set(value, { value, label, icon, kind, parent, children: [], count: 0 });
+      return nodes.get(value);
+    };
+    const roots = { nb: [], cf: [], api: [] };
+    // notebooks (folders), outside this project and outside the Confluence / APIs roots themselves
+    const books = S.notebooks.filter((n) => n !== name && !n.startsWith(name + '/') && !ctx.reserved.includes(n)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    for (const nb of books) {
+      const segs = nb.split('/');
+      const section = segs[0] === CF ? 'cf' : segs[0] === APIS ? 'api' : 'nb';
+      const parentPath = segs.slice(0, -1).join('/');
+      const parent = parentPath && !ctx.reserved.includes(parentPath) ? nodes.get(parentPath) : null;
+      const node = add(nb, segs[segs.length - 1], section === 'cf' ? ICON.confluence : ICON.book, section === 'cf' ? 'Confluence folder' : 'notebook', parent);
+      if (parent) parent.children.push(node); else roots[section].push(node);
+    }
+    // single notes worth picking: Confluence pages (not a folder's own page) and API specs
+    for (const n of live()) {
+      if (inBook(n, name)) continue;
+      const top = n.notebook.split('/')[0];
+      const isSpec = n.kind === 'api';
+      if (top !== CF && !isSpec) continue;
+      if (!isSpec && n.notebook.split('/').pop() === n.title) continue; // the page that owns its folder
+      const parent = nodes.get(n.notebook) || null;
+      const node = add(relOf(n), n.title, isSpec ? ICON.api : ICON.note, isSpec ? 'API spec' : 'Confluence page', isSpec ? null : parent);
+      if (isSpec) { if (!roots.api.includes(node)) roots.api.push(node); } else if (parent) parent.children.push(node); else roots.cf.push(node);
+    }
+    for (const nd of nodes.values()) nd.count = live().filter((n) => !n.trashed && (nd.kind === 'API spec' || nd.kind === 'Confluence page' ? relOf(n) === nd.value : inBook(n, nd.value))).length;
+    for (const s0 of picked) if (!nodes.has(s0)) roots.nb.unshift(add(s0, s0, ICON.book, 'missing', null));
+    const ancestorPicked = (nd) => { for (let x = nd.parent; x; x = x.parent) if (picked.has(x.value)) return x; return null; };
+    const expanded = new Set();
+    // open the branches that hold something already picked
+    for (const v of picked) for (let x = nodes.get(v)?.parent; x; x = x.parent) expanded.add(x.value);
+
     const ov = overlay('modal-ov');
     ov.innerHTML = `
       <div class="modal project-docs">
         <h2>Documents in “${esc(name)}”</h2>
-        <p class="ph-hint">Everything in the “${esc(name)}” notebook is already part of the project. Tick what else belongs to it: Confluence pages you follow, API specs, other notebooks. Nothing is moved or copied.</p>
+        <p class="ph-hint">Everything in the “${esc(name)}” notebook is already part of the project. Tick what else belongs to it. Ticking a folder includes everything inside it. Nothing is moved or copied.</p>
+        <div class="pd-selected"></div>
         <input class="pd-filter" type="search" placeholder="Filter…" spellcheck="false">
-        <ul class="pd-list"></ul>
+        <div class="pd-tree"></div>
         <div class="actions"><button class="btn" data-act="cancel">Cancel</button><button class="btn primary" data-act="ok">Save</button></div>
       </div>`;
-    const list = $('.pd-list', ov);
+    const tree = $('.pd-tree', ov);
+    const sel = $('.pd-selected', ov);
     const filter = $('.pd-filter', ov);
+
+    const drawSelected = () => {
+      sel.textContent = '';
+      if (!picked.size) { sel.append(el('span', 'pd-sel-empty', 'Nothing extra selected yet.')); return; }
+      sel.append(el('span', 'pd-sel-label', `Selected (${picked.size})`));
+      for (const v of picked) {
+        const nd = nodes.get(v);
+        const c = el('span', 'pd-sel-chip', nd ? nd.label : v);
+        c.title = v;
+        const x = el('button', 'pd-sel-x', '×');
+        x.title = 'Remove';
+        x.addEventListener('click', () => { picked.delete(v); draw(); });
+        c.append(x);
+        sel.append(c);
+      }
+    };
+
     const draw = () => {
       const q = filter.value.trim().toLowerCase();
-      list.textContent = '';
-      const shown = cands.filter((c) => !q || c.label.toLowerCase().includes(q));
-      for (const c of shown.sort((a, b) => picked.has(b.value) - picked.has(a.value))) {
-        const li = el('li', 'pd-item');
+      const matches = (nd) => !q || nd.label.toLowerCase().includes(q) || nd.value.toLowerCase().includes(q) || nd.children.some(matches);
+      tree.textContent = '';
+      const row = (nd, depth) => {
+        if (!matches(nd)) return;
+        const under = ancestorPicked(nd);
+        const li = el('div', 'pd-row' + (under ? ' included' : ''));
+        li.style.paddingLeft = `${6 + depth * 18}px`;
+        const open = !!q || expanded.has(nd.value);
+        const chev = el('button', 'pd-chev' + (nd.children.length ? (open ? ' open' : '') : ' none'), nd.children.length ? '›' : '');
+        if (nd.children.length) chev.addEventListener('click', () => { if (expanded.has(nd.value)) expanded.delete(nd.value); else expanded.add(nd.value); draw(); });
         const box = el('input');
         box.type = 'checkbox';
-        box.checked = picked.has(c.value);
-        const lab = el('label');
-        lab.append(box, iconEl(c.icon), el('span', 'pd-label', c.label), el('span', 'pd-what', c.what));
-        box.addEventListener('change', () => { if (box.checked) picked.add(c.value); else picked.delete(c.value); });
-        li.append(lab);
-        list.append(li);
-      }
-      if (!shown.length) list.append(el('li', 'ph-hint', cands.length ? 'Nothing matches.' : 'Nothing to add yet. Fetch Confluence pages or create an API spec first.'));
+        box.checked = picked.has(nd.value) || !!under;
+        box.disabled = !!under;
+        box.addEventListener('change', () => {
+          if (box.checked) {
+            picked.add(nd.value);
+            // a folder now covers its children: drop separate picks inside it
+            const drop = (x) => x.children.forEach((c) => { picked.delete(c.value); drop(c); });
+            drop(nd);
+          } else picked.delete(nd.value);
+          draw();
+        });
+        const lab = el('label', 'pd-lab');
+        lab.append(box, iconEl(nd.icon), el('span', 'pd-label', nd.label));
+        if (nd.count && nd.kind !== 'Confluence page' && nd.kind !== 'API spec') lab.append(el('span', 'pd-count', String(nd.count)));
+        if (under) lab.append(el('span', 'pd-what', `in “${under.label}”`));
+        else if (nd.kind === 'missing') lab.append(el('span', 'pd-what', 'missing'));
+        lab.title = nd.value;
+        li.append(chev, lab);
+        tree.append(li);
+        if (open) [...nd.children].forEach((c) => row(c, depth + 1));
+      };
+      const section = (title, list, hint) => {
+        if (!list.length) return;
+        const visible = list.filter(matches);
+        if (!visible.length) return;
+        tree.append(el('div', 'pd-section', title));
+        visible.forEach((nd) => row(nd, 0));
+        if (hint) tree.append(el('div', 'pd-hint', hint));
+      };
+      section('Notebooks', roots.nb);
+      section('Confluence pages', roots.cf);
+      section('API specs', roots.api);
+      if (!tree.childElementCount) tree.append(el('div', 'ph-hint', nodes.size ? 'Nothing matches.' : 'Nothing to add yet. Fetch Confluence pages or create an API spec first.'));
+      drawSelected();
     };
     filter.addEventListener('input', draw);
     $('[data-act=cancel]', ov).addEventListener('click', closeOverlay);

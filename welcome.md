@@ -84,3 +84,7 @@ Math: $E = mc^2$
 graph LR
   Idea --> Note --> Done
 ```
+
+## Learn more
+
+- The **VibeNote Guide** project (in the sidebar, or **Help → VibeNote Guide**) explains every feature, one short note per area, with all the keyboard shortcuts.

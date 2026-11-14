@@ -1728,7 +1728,7 @@ const COMMANDS = [
   { id: 'sections-expand', title: 'Expand All Note List Headings', when: () => !SINGLE && S.sections.length > 0, run: () => setSections(true) },
   { id: 'sections-collapse', title: 'Collapse All Note List Headings', when: () => !SINGLE && S.sections.length > 0, run: () => setSections(false) },
   { id: 'settings', title: 'Settings', key: '⌘,', run: openSettings },
-  { id: 'coding-layout', title: 'Toggle Coding Layout', key: '⇧⌘J', when: () => !SINGLE, run: () => toggleCoding() },
+  { id: 'coding-layout', title: 'Toggle Coding Layout', key: '⌥⌘J', when: () => !SINGLE, run: () => toggleCoding() },
   { id: 'review-changes', title: 'Review Code Changes', when: () => !SINGLE && !!S.project, run: () => codeUI.openChanges() },
   { id: 'new-diagram', title: 'New Diagram (draw.io)', when: () => !SINGLE, run: () => diagramUI.create(S.home || (S.filter.type === 'notebook' ? S.filter.name : '')) },
   { id: 'open-diagram', title: 'Open Diagram File…', when: () => !SINGLE, run: () => diagramUI.pick() },
@@ -1737,6 +1737,13 @@ const COMMANDS = [
   { id: 'new-chat', title: 'New Claude Chat in This Project', run: () => { comments.toggle(false); agentPanel.toggle(true); agentPanel.newThread(); } },
   { id: 'toggle-agent', title: 'Toggle Claude Panel', key: '⌘J', run: () => { comments.toggle(false); agentPanel.toggle(); } },
   { id: 'claude-chats', title: 'Claude Chats… (past chats: read, continue, save as note)', when: () => !SINGLE, run: () => chatsUI.open() },
+  { id: 'open-guide', title: 'VibeNote Guide (how everything works)', when: () => !SINGLE, run: async () => {
+    const name = await api.openGuide();
+    if (!name) return toast('The guide isn’t part of this build.');
+    await refresh();
+    await projectUI.reload();
+    projectUI.openHome(name);
+  } },
   { id: 'claude-write', title: 'Ask Claude to Write… (/claude)', key: '⇧⌘J', when: needNote, run: () => writer.open() },
   { id: 'add-comment', title: 'Add Comment on Selection', key: '⌥⌘M', when: needNote, run: () => comments.addComment() },
   { id: 'toggle-comments', title: 'Toggle Comments', key: '⇧⌘M', run: () => comments.toggle() },

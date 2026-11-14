@@ -32,6 +32,14 @@ open directly from the home page. See `docs/workspace-spec.md` → Step 2 and CL
 isolated profile (open, save through the editor's message, outside change reloads, write guards, a real 67 KB
 diagram renders). Real keyboard shortcuts inside the editor could not be tested automatically.
 
+## 2026-11-14 (morning, owner's main Mac)
+
+- **VibeNote Guide**: a built-in project shipped in `guide/` and synced into `<notes>/VibeNote Guide` on start (`syncGuide` in main.js; per notes folder in `config.guides`). Untouched notes are refreshed when the shipped text changes; edited or deleted ones are respected; Help → VibeNote Guide (`open-guide`) restores it. **When a user-facing feature changes, update the matching `guide/` note** (as well as `welcome.md`).
+- Project home: cards in balanced columns ("fill the gaps", `masonry` in project-ui.js); repository rows on two lines.
+- Documents window: sectioned tree (Notebooks / Confluence pages / API specs), folding, ticking a folder includes its children, Selected strip.
+- Diagrams: Delete (to the macOS Trash) from the sidebar, the project page and the editor toolbar.
+- Shortcut clash fixed: ⇧⌘J = /claude, **⌥⌘J = Coding layout**.
+
 ## What v1.1.0 brought into stable (newest first)
 
 | Feature | Where | Notes |

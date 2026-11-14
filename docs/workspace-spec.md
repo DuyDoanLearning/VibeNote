@@ -56,7 +56,7 @@ real keys.
 
 ## Step 3 — built (agent branch, 2026-11-14)
 
-- **Coding layout** (⇧⌘J, or the columns button in the Claude panel): sidebar | chat (wide, in the middle) | the
+- **Coding layout** (⌥⌘J, or the columns button in the Claude panel): sidebar | chat (wide, in the middle) | the
   code or document on the right. The note list is hidden while it is on; closing the panel leaves it.
 - **Changes** (the ± button in the panel, *Changes* next to a repository on the home page): what is not committed
   yet in a repository (new files included), or any of its last 25 commits, as red/green diffs per file. Refreshes

@@ -877,7 +877,8 @@ body.no-note.project-home #project-home { display: block; flex: 1; min-height: 0
 .ph-md.markdown > * { max-width: none; }
 .ph-md.markdown h2 { font-size: 13px; text-transform: none; letter-spacing: 0; color: var(--text); border: 0; margin: .9em 0 .2em; padding: 0; }
 .ph-md.markdown > :first-child { margin-top: 0; }
-.project-new, .project-docs { width: min(520px, 92vw); }
+.project-new { width: min(520px, 92vw); }
+.project-docs { width: min(640px, 94vw); }
 .project-new .pn-name, .project-docs .pd-filter { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); outline: none; font-size: 14px; }
 .project-new .pn-name:focus, .project-docs .pd-filter:focus { border-color: var(--accent); }
 .pd-list { list-style: none; margin: 10px 0 0; padding: 0; max-height: 46vh; overflow-y: auto; }
@@ -1014,3 +1015,27 @@ body.coding.agent-open:not(.comments-open) #agent-btn { display: none !important
 .ph-repo-meta { display: flex; align-items: center; gap: 5px; min-width: 0; padding-left: 21px; }
 .ph-repo-meta .ph-chip { flex: 0 1 auto; min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
 .ph-repo-meta .ph-commit { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; margin: 0; }
+
+/* Documents in <project>: tree with sections */
+.pd-selected { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 0 0 10px; min-height: 22px; }
+.pd-sel-label { font-size: 11.5px; font-weight: 600; color: var(--muted); margin-right: 3px; }
+.pd-sel-empty { font-size: 12px; color: var(--faint); }
+.pd-sel-chip { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; padding: 1px 4px 1px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-sel-x { font-size: 14px; line-height: 1; padding: 0 4px; color: inherit; border-radius: 50%; }
+.pd-sel-x:hover { background: var(--accent); color: #fff; }
+.pd-tree { margin-top: 8px; max-height: 50vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); padding: 4px 4px 8px; }
+.pd-section { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); padding: 10px 8px 4px; }
+.pd-hint { font-size: 11.5px; color: var(--faint); padding: 2px 30px 4px; }
+.pd-row { display: flex; align-items: center; gap: 2px; border-radius: 7px; }
+.pd-row:hover { background: var(--hover); }
+.pd-row.included .pd-label { color: var(--muted); }
+.pd-chev { width: 18px; height: 22px; flex: none; color: var(--faint); font-size: 15px; line-height: 1; transition: transform .12s; }
+.pd-chev.open { transform: rotate(90deg); }
+.pd-chev.none { pointer-events: none; }
+.pd-lab { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; padding: 5px 6px 5px 0; cursor: default; }
+.pd-lab .ico { display: flex; color: var(--muted); flex: none; }
+.pd-lab .ico svg { width: 14px; height: 14px; }
+.pd-lab input { accent-color: var(--accent); margin: 0; flex: none; }
+.pd-count { margin-left: auto; font-size: 11px; color: var(--faint); padding-left: 8px; }
+.pd-lab .pd-what { margin-left: auto; padding-left: 8px; white-space: nowrap; }
+.pd-count + .pd-what { margin-left: 8px; }

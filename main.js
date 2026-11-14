@@ -122,6 +122,7 @@ function loadConfig() {
     if (c.projects && typeof c.projects === 'object') config.projects = c.projects;
     if (c.projectSeen && typeof c.projectSeen === 'object') config.projectSeen = c.projectSeen;
     if (Array.isArray(c.recentDiagrams)) config.recentDiagrams = c.recentDiagrams.filter((x) => typeof x === 'string');
+    if (c.guides && typeof c.guides === 'object') config.guides = c.guides;
     config.settings = { ...DEFAULT_SETTINGS, ...(c.settings || {}) };
   } catch {}
 }
@@ -2373,7 +2374,7 @@ function buildMenu() {
         item('Toggle Sidebar', 'toggle-sidebar', 'CmdOrCtrl+\\'),
         item('Focus Mode', 'focus-mode', 'CmdOrCtrl+Shift+Enter'),
         item('Claude Panel', 'toggle-agent', 'CmdOrCtrl+J'),
-        item('Coding Layout', 'coding-layout', 'CmdOrCtrl+Shift+J'),
+        item('Coding Layout', 'coding-layout', 'CmdOrCtrl+Alt+J'),
         item('Comments', 'toggle-comments', 'CmdOrCtrl+Shift+M'),
         {
           label: 'Sort Notes By',
@@ -2391,9 +2392,61 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu' },
+    { role: 'help', submenu: [item('VibeNote Guide', 'open-guide')] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
+
+// ---------- the built-in "VibeNote Guide" project ----------
+// Notes shipped in guide/ are copied into <notes>/VibeNote Guide (a project: it has a "Project brief" note).
+// A guide note you never edited is refreshed when the shipped one changes; a note you edited is kept as yours.
+// Deleting the guide (or one of its notes) is respected; Help → VibeNote Guide brings it back.
+const GUIDE_NAME = 'VibeNote Guide';
+async function syncGuide(force = false) {
+  const src = path.join(__dirname, 'guide');
+  if (!fs.existsSync(src)) return null;
+  const dest = path.join(rootDir(), GUIDE_NAME);
+  config.guides ||= {};
+  const g = config.guides[rootDir()] || { files: {} };
+  if (!force && g.created && !fs.existsSync(dest)) return null; // removed on purpose
+  await fsp.mkdir(dest, { recursive: true });
+  const hash = (s) => require('crypto').createHash('sha1').update(s).digest('hex');
+  const hashOf = (f) => { try { return hash(fs.readFileSync(f, 'utf8')); } catch { return ''; } };
+  for (const f of (await fsp.readdir(src)).filter((x) => x.endsWith('.md'))) {
+    const shipped = await fsp.readFile(path.join(src, f), 'utf8');
+    const target = path.join(dest, f);
+    const known = g.files[f];
+    if (!fs.existsSync(target)) {
+      if (known && !force) continue; // you deleted this one
+      await fsp.writeFile(target, shipped);
+      g.files[f] = hash(shipped);
+      continue;
+    }
+    const current = hash(await fsp.readFile(target, 'utf8'));
+    if (current === hash(shipped)) { g.files[f] = current; continue; }
+    if (known && current === known) { // untouched since we wrote it: update it
+      await snapshot(target, true, 'Before guide update').catch(() => {});
+      await fsp.writeFile(target, shipped);
+      g.files[f] = hash(shipped);
+    }
+  }
+  // Lists sort newest first: stamp freshly written guide notes so they read in order (brief, 1, 2, … 10).
+  const files = (await fsp.readdir(dest)).filter((x) => g.files[x] && x.endsWith('.md'));
+  const rank = (f) => (f === 'Project brief.md' ? -1 : parseInt(f, 10) || 99);
+  const base = Date.now() / 1000;
+  for (const f of files.sort((a, b) => rank(a) - rank(b))) {
+    const full = path.join(dest, f);
+    if (hashOf(full) !== g.files[f] || (fs.statSync(full).mtimeMs < (g.stampedAt || 0))) continue; // edited or already ordered
+    const t = base - (rank(f) + 2) * 60;
+    await fsp.utimes(full, t, t).catch(() => {});
+  }
+  g.stampedAt = Date.now();
+  g.created = true;
+  config.guides[rootDir()] = g;
+  saveConfig();
+  return GUIDE_NAME;
+}
+ipcMain.handle('guide:open', () => syncGuide(true));
 
 app.setName('VibeNote');
 app.on('before-quit', () => { quitting = true; });
@@ -2406,6 +2459,7 @@ app.whenReady().then(async () => {
     await fsp.mkdir(path.join(rootDir(), 'Ideas'), { recursive: true });
     await fsp.writeFile(path.join(rootDir(), 'Welcome to VibeNote.md'), fs.readFileSync(path.join(__dirname, 'welcome.md'), 'utf8'));
   }
+  await syncGuide().catch((e) => console.warn('guide:', e.message));
   buildMenu();
   serveDrawio();
   createWindow();

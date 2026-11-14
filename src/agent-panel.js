@@ -62,7 +62,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
       <button class="thread-others" title="Other chats in this project" hidden></button>
       <span class="spacer"></span>
       <button class="icon thread-changes" title="Review what changed in the code (and comment on lines)"><svg viewBox="0 0 24 24"><path d="M8 4v10M3 9h10M4 19h8M17 5v14M14 16l3 3 3-3"/></svg></button>
-      <button class="icon thread-wide" title="Coding layout: chat in the middle, code or document beside it (⇧⌘J)"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg></button>
+      <button class="icon thread-wide" title="Coding layout: chat in the middle, code or document beside it (⌥⌘J)"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg></button>
       <button class="icon thread-new" title="New chat in this project"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
     </div>
     <div class="agent-log"></div>

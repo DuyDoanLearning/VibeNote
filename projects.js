@@ -99,9 +99,11 @@ async function repoInfo(repo, since) {
 //     - "Confluence/Space/Feature X"
 function parseSources(extra) {
   const lines = String(extra || '').split('\n');
-  const i = lines.findIndex((l) => /^sources:\s*$/.test(l));
+  const i = lines.findIndex((l) => /^sources:\s*(\[.*\])?\s*$/.test(l));
   if (i < 0) return [];
   const out = [];
+  const inline = /^sources:\s*\[(.*)\]\s*$/.exec(lines[i]); // also accept the one-line form: sources: ["a", "b"]
+  if (inline) return inline[1].split(',').map((v) => v.trim().replace(/^"(.*)"$/, '$1')).filter(Boolean);
   for (let j = i + 1; j < lines.length; j++) {
     const m = /^\s+-\s+(.*)$/.exec(lines[j]);
     if (!m) break;
@@ -114,7 +116,7 @@ function parseSources(extra) {
 
 function setSources(extra, list) {
   const lines = String(extra || '').split('\n').filter((l, i, a) => !(l === '' && a.length === 1));
-  const i = lines.findIndex((l) => /^sources:\s*$/.test(l));
+  const i = lines.findIndex((l) => /^sources:\s*(\[.*\])?\s*$/.test(l));
   if (i >= 0) {
     let j = i + 1;
     while (j < lines.length && /^\s+-\s+/.test(lines[j])) j++;

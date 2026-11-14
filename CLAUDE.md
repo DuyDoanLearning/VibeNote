@@ -22,7 +22,7 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - Liked: Inkdrop-style experience (left-aligned, tight spacing, explicit title field), VS Code themes, keyboard-driven editing. **Never mention "Inkdrop" in anything public in this repo** (README, docs, code comments, GitHub description).
 - Usual loop after each change: test in an isolated profile → `npm run package` → quit the running app gracefully (`osascript -e 'tell application "VibeNote" to quit'`) → copy the .app to /Applications → reopen → commit → push. The owner expects things committed and pushed.
 - Commit author is the owner's git identity; repo is public on GitHub (`DuyDoanLearning/VibeNote`, MIT).
-- When a user-facing feature changes, update `welcome.md` (first-run note) and, if asked, the owner's "Guide" notebook notes (in their notes folder, not the repo).
+- When a user-facing feature changes, update `welcome.md` (first-run note) and the matching note in `guide/` (the built-in VibeNote Guide project, synced into the notes folder).
 
 ## Branches / releases
 - `main` + tags `v*-stable` (newest: `v1.1.0-stable`, which brought the Claude panel, Confluence and API specs into stable on 2026-11-13; `v1.0.2-stable` is the last notes-only release) = the stable app. Keep it stable; only fixes and docs go here. Tag each stable fix release `vX.Y.Z-stable` (the install script picks the newest).
