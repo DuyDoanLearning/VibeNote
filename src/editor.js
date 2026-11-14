@@ -121,7 +121,7 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
     api: { name: 'API specs', rank: 3 }, diagram: { name: 'Diagrams', rank: 4 },
   };
   const wikiComplete = (ctx) => {
-    const m = ctx.matchBefore(/\[\[[^\]\n]*/);
+    const m = ctx.matchBefore(/\[\[(?:[^\]\n]|\](?!\]))*/);
     if (!m) return null;
     const typed = m.text.slice(2);
     const hash = typed.indexOf('#');
@@ -217,7 +217,7 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
           return false;
         };
         return (
-          (onLinkClick && hit(/\[\[([^\]\n|]+)(?:\|[^\]\n]+)?\]\]/g, (m) => onLinkClick(m[1].trim()))) ||
+          (onLinkClick && hit(/\[\[([^\n|]+?)(?:\|[^\n]+?)?\]\](?!\])/g, (m) => onLinkClick(m[1].trim()))) ||
           hit(/https?:\/\/[^\s<>()"\]]+/g, (m) => window.open(m[0], '_blank'))
         );
       },

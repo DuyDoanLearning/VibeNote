@@ -383,7 +383,7 @@ function restoreTable(orig, table, doc) {
 // Markdown (a changed region of the note) → Confluence HTML.
 function convertRegion(text, side, replaced, opts = {}) {
   // [[Title]] / [[Title#Heading|text]] → a link to the Confluence page when it is one, otherwise just the words.
-  text = text.replace(/\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/g, (_m, target, alias) => {
+  text = text.replace(/\[\[([^\n|]+?)(?:\|([^\n]+?))?\]\](?!\])/g, (_m, target, alias) => {
     const label = (alias || target.replace(/\s*#\s*/, ' › ')).trim().replace(/[[\]]/g, '');
     const url = opts.resolveLink?.(target.trim());
     return url ? `[${label}](<${url}>)` : label;
