@@ -26,7 +26,7 @@ export function createProjectUI(ctx) {
   const errText = (e) => String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
   const relOf = (n) => n.path.slice(S.root.length + 1);
   const iconEl = (svg, cls = 'ico') => { const s = el('span', cls); s.innerHTML = svg; return s; };
-  const chip = (text, cls = '') => el('span', `ph-chip ${cls}`.trim(), text);
+  const chip = (text, cls = '') => { const c = el('span', `ph-chip ${cls}`.trim(), text); c.title = text; return c; };
   const ago = (ms) => {
     const s = (Date.now() - ms) / 1000;
     if (s < 3600) return `${Math.max(1, Math.round(s / 60))} min ago`;
@@ -304,18 +304,23 @@ export function createProjectUI(ctx) {
       for (const r of h.repos) {
         const li = el('li', 'ph-item ph-repo');
         const line = el('div', 'ph-repo-line');
-        line.append(iconEl(ICON.repo), el('span', 'ph-item-title', r.rel || r.name));
-        if (r.branch) line.append(chip(r.branch, 'branch'));
-        if (r.changed) line.append(chip(`${r.changed} uncommitted`, 'warn'));
-        if (since && r.newCommits) line.append(chip(`${r.newCommits} new`, 'new'));
-        if (r.hasGuide) { const g = chip('CLAUDE.md'); g.title = 'This repository has its own guide for Claude' + (r.hasSkills ? ' and its own skills' : ''); line.append(g); }
+        const title = el('span', 'ph-item-title', r.rel || r.name);
+        title.title = r.rel || r.name;
+        line.append(iconEl(ICON.repo), title);
+        // Second line: branch / status badges, then the last commit — readable even in a narrow column.
+        const meta = el('div', 'ph-repo-meta');
+        if (r.branch) meta.append(chip(r.branch, 'branch'));
+        if (r.changed) meta.append(chip(`${r.changed} uncommitted`, 'warn'));
+        if (since && r.newCommits) meta.append(chip(`${r.newCommits} new`, 'new'));
+        if (r.hasGuide) { const g = chip('CLAUDE.md'); g.title = 'This repository has its own guide for Claude' + (r.hasSkills ? ' and its own skills' : ''); meta.append(g); }
         const chatBtn = small('Chat', (e) => { e.stopPropagation(); newChat(name, r.path); });
         chatBtn.title = `New chat focused on ${r.rel || r.name}`;
         const revBtn = small(r.changed ? `Changes (${r.changed})` : 'Changes', (e) => { e.stopPropagation(); S.project = name; ctx.openCodeChanges?.(r.path); });
         revBtn.title = 'Review what changed in this repository, and comment on lines for Claude';
         line.append(el('span', 'spacer'), revBtn, chatBtn);
         li.append(line);
-        if (r.last) li.append(el('div', 'ph-commit', `${r.last.subject}  ·  ${ago(r.last.at)}`));
+        if (r.last) meta.append(el('span', 'ph-commit', `${r.last.subject}  ·  ${ago(r.last.at)}`));
+        if (meta.childElementCount) li.append(meta);
         li.title = r.path;
         li.addEventListener('dblclick', () => api.projects.reveal(r.path));
         rl.append(li);
@@ -353,8 +358,51 @@ export function createProjectUI(ctx) {
     }
 
     box.append(grid);
+    masonry(grid);
     box.scrollTop = top;
     renderSide();
+  }
+
+  // "Fill the gaps": cards go into equal-width columns so a long card doesn't leave empty space beside it. The tallest
+  // cards are placed first (each into the shortest column); each column then keeps the cards' usual order, and the
+  // columns are ordered by their first card. Re-laid out when the width changes the number of columns.
+  let gridObserver = null;
+  function masonry(grid) {
+    const cards = [...grid.children];
+    let cols = 0;
+    const layout = () => {
+      const w = grid.clientWidth;
+      if (!w) return;
+      const n = Math.max(1, Math.min(cards.length, Math.floor((w + 16) / (300 + 16))));
+      if (n === cols) return;
+      cols = n;
+      // measure each card at column width
+      const probe = el('div', 'ph-col');
+      probe.style.cssText = `position:absolute;visibility:hidden;width:${(w - 16 * (n - 1)) / n}px`;
+      grid.append(probe);
+      const heights = new Map(cards.map((c) => { probe.append(c); return [c, c.offsetHeight]; }));
+      probe.remove();
+      const buckets = Array.from({ length: n }, () => ({ h: 0, cards: [] }));
+      for (const c of [...cards].sort((a, b) => heights.get(b) - heights.get(a))) {
+        const t = buckets.reduce((a, b) => (b.h < a.h ? b : a));
+        t.cards.push(c);
+        t.h += heights.get(c) + 16;
+      }
+      const order = (c) => cards.indexOf(c);
+      for (const b of buckets) b.cards.sort((x, y) => order(x) - order(y));
+      buckets.sort((x, y) => order(x.cards[0]) - order(y.cards[0]));
+      grid.replaceChildren(...buckets.filter((b) => b.cards.length).map((b) => { const col = el('div', 'ph-col'); col.append(...b.cards); return col; }));
+    };
+    gridObserver?.disconnect();
+    let lastW = 0;
+    gridObserver = new ResizeObserver(() => {
+      const w = grid.clientWidth;
+      if (w === lastW) return; // only width matters (height changes come from the layout itself)
+      lastW = w;
+      requestAnimationFrame(layout);
+    });
+    gridObserver.observe(grid);
+    layout();
   }
 
   // ---------- new project ----------
