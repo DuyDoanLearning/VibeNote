@@ -67,13 +67,6 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - `restartFresh()` in main.js: when resume fails with "No conversation found with session ID", the chat restarts with `transcriptOf(items)` as background. A test that deletes `~/.claude/projects/<folder>` will trigger it.
 - Name clash to avoid: `openChanges` in the projectUI context is the Confluence "Changes to push" window; the code review is `openCodeChanges`.
 
-## Commands
-- `npm start` — build + run (dev)
-- `npm run build` — `build.mjs`: bundles `src/renderer.js` → `dist/renderer.js` and `src-main/agent.js` → `dist/agent.mjs`, copies KaTeX + Mermaid into `dist/`
-- `npm run package` — `release/VibeNote-darwin-<arch>/VibeNote.app` (with `build/icon.icns`)
-- `npm run smoke` — `scripts/smoke-test.js`
-- `npm run icon` — rebuild `build/icon.png` / `.icns` from `build/icon.svg`
-
 ## Testing — important
 - **Never run the app under test against the real profile.** Electron's `userData` ignores `$HOME`; a test that changes settings will overwrite the owner's real `~/Library/Application Support/VibeNote/config.json` (this happened once and pointed their notes folder at a temp dir). Always call `app.setPath('userData', <temp dir>)` before requiring `main.js`, and point `config.root` at a temp notes folder — `scripts/smoke-test.js` shows the pattern.
 - Drive the UI with `webContents.send('command', id)` (same ids as the menus / `COMMANDS` in renderer.js), `executeJavaScript`, and `webContents.sendInputEvent` for real key presses; check results with `capturePage()` screenshots and by reading files on disk.

@@ -1333,6 +1333,8 @@ function applySettings(s) {
   root.setProperty('--editor-font', fonts[s.editorFont] || fonts.mono);
   root.setProperty('--editor-size', `${s.fontSize || 15}px`);
   root.setProperty('--line-width', widths[s.lineWidth] || widths.medium);
+  if (s.theme === 'lamplight') document.documentElement.dataset.builtinTheme = 'lamplight';
+  else delete document.documentElement.dataset.builtinTheme;
   editor.applySettings(s);
   renderPreview();
 }
@@ -1662,6 +1664,7 @@ async function openSettings() {
           <option value="system">Match system (light / dark)</option>
           <option value="light">VibeNote Light</option>
           <option value="dark">VibeNote Dark</option>
+          <option value="lamplight">Lamplight notebook (dark, graph paper)</option>
         </optgroup>
         <optgroup label="Visual Studio Code">
           <option value="vscode">Same as VS Code (follows changes)</option>

@@ -1050,3 +1050,60 @@ body.coding.agent-open:not(.comments-open) #agent-btn { display: none !important
 /* Confluence section: pages in the tree */
 .cf-page-row .label { color: var(--text); }
 .cf-page-row.edited .label::after { content: ' •'; color: #c2410c; font-weight: 800; }
+
+/* ---------- Built-in theme: Lamplight notebook ----------
+   A graph-paper notebook read by lamplight: ink-slate page, paper-cream ink, amber highlights,
+   teal for data, rust-orange for code names, gold for variables, lavender for literals. */
+html[data-builtin-theme="lamplight"] {
+  --bg: #14171C;
+  --sidebar: #191D23;
+  --list: #171A20;
+  --panel: #1E222A;
+  --border: #2A2F38;
+  --text: #E6E1D6;
+  --muted: #A19B8F;
+  --faint: #6F6A61;
+  --accent: #F2B544;
+  --accent-soft: rgba(242, 181, 68, 0.14);
+  --selection: rgba(242, 181, 68, 0.24);
+  --match: rgba(63, 191, 174, 0.30);
+  --code: #D9673A;
+  --code-bg: #1E222A;
+  --hover: rgba(230, 225, 214, 0.05);
+  --shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.45);
+  --md-heading: #E6E1D6;
+  --md-bold: #F3EEE4;
+  --md-italic: #C7C1B4;
+  --md-link: #F2B544;
+  --md-quote: #A19B8F;
+  --md-mark: #6F6A61;
+  --syn-keyword: #F2B544;
+  --syn-string: #3FBFAE;
+  --syn-number: #A99BE0;
+  --syn-comment: #7E796F;
+  --syn-func: #D9673A;
+  --syn-type: #E0A04A;
+  --syn-attr: #3FBFAE;
+  --syn-tag: #D9673A;
+  --syn-meta: #E0A04A;
+  --list-1: #F2B544;
+  --list-2: #3FBFAE;
+  --list-3: #A99BE0;
+  --paper-minor: rgba(230, 225, 214, 0.035);
+  --paper-major: rgba(230, 225, 214, 0.07);
+  color-scheme: dark;
+}
+/* the faint graph paper: a minor rule every 24px, a stronger one every 120px; it scrolls with the page */
+html[data-builtin-theme="lamplight"] :is(#editor .cm-scroller, #preview, #project-home) {
+  background-image:
+    linear-gradient(var(--paper-major) 1px, transparent 1px),
+    linear-gradient(90deg, var(--paper-major) 1px, transparent 1px),
+    linear-gradient(var(--paper-minor) 1px, transparent 1px),
+    linear-gradient(90deg, var(--paper-minor) 1px, transparent 1px);
+  background-size: 120px 120px, 120px 120px, 24px 24px, 24px 24px;
+  background-attachment: local;
+}
+/* amber is light: dark ink on amber buttons and bubbles */
+html[data-builtin-theme="lamplight"] :is(.btn.primary, .palette li.sel, .msg.user, .push-btn, .ph-small.primary, .pd-sel-x:hover) { color: #14171C; }
+html[data-builtin-theme="lamplight"] .msg.user a { color: #14171C; }
+html[data-builtin-theme="lamplight"] #comment-float { color: #14171C; box-shadow: 0 4px 14px rgba(242, 181, 68, .3), 0 1px 3px rgba(0, 0, 0, .3); }

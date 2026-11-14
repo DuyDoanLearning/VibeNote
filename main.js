@@ -801,7 +801,8 @@ function applyTheme() {
     const key = t === 'vscode' ? themes.vscodeThemeKey(nativeTheme.shouldUseDarkColors) : t.slice(6);
     theme = key ? themes.loadTheme(key) : null;
   }
-  nativeTheme.themeSource = theme ? theme.type : ['light', 'dark'].includes(t) ? t : 'system';
+  // Built-in "Lamplight notebook" is a dark theme drawn by styles.css (html[data-builtin-theme="lamplight"]).
+  nativeTheme.themeSource = theme ? theme.type : t === 'lamplight' ? 'dark' : ['light', 'dark'].includes(t) ? t : 'system';
   currentTheme = theme;
   broadcast('theme:changed', theme);
 }
