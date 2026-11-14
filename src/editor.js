@@ -97,7 +97,7 @@ export const theme = EditorView.theme({
   '.cm-completionDetail': { marginLeft: '12px', opacity: '0.6', fontStyle: 'normal' },
 });
 
-const TASK_RE = /^((?:\s*>)*\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])\]/;
+const TASK_RE = /^((?:\s*>)*\s*(?:(?:[-*+]|\d+[.)])\s+\[|\[(?=[ xX]\][ \t]+\S)))([ xX])\]/; // "- [ ]", or a bare "[ ] text" line (src/bare-tasks.js)
 const URL_RE = /^https?:\/\/[^\s<>"]+$/;
 
 export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClick, onPasteUrl, getTitles, getFragments = () => [], onSelection, onCommentClick, suggest }) {

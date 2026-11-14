@@ -7,6 +7,7 @@
 // images, layouts, merged-cell tables) become ```confluence boxes that always go back unchanged — even if
 // the box is moved or its label edited.
 import { Marked } from 'marked';
+import { bareTasks } from './bare-tasks.js';
 
 // ---------- Confluence HTML → Markdown ----------
 
@@ -390,7 +391,7 @@ function convertRegion(text, side, replaced, opts = {}) {
     const url = opts.resolveLink?.(target.trim());
     return url ? `[${label}](<${url}>)` : label;
   });
-  const html = md.parse(text);
+  const html = md.parse(bareTasks(text));
   const doc = new DOMParser().parseFromString(`<!doctype html><body>${html}</body>`, 'text/html');
   const body = doc.body;
   const problems = [];

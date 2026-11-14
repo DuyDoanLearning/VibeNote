@@ -101,6 +101,9 @@ export function toggleTask(view) {
     if ((m = TASK.exec(line.text))) {
       const pos = line.from + m[1].length + m[2].length + m[3].length + 1;
       changes.push({ from: pos, to: pos + 1, insert: m[4] === ' ' ? 'x' : ' ' });
+    } else if ((m = /^(\s*(?:>\s*)*)\[([ xX])\](?=\s)/.exec(line.text))) {
+      const pos = line.from + m[1].length + 1;
+      changes.push({ from: pos, to: pos + 1, insert: m[2] === ' ' ? 'x' : ' ' });
     } else if ((m = ITEM.exec(line.text))) {
       changes.push({ from: line.from + m[0].length, insert: '[ ] ' });
     } else {

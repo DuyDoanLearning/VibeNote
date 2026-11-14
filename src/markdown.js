@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/common';
 import katex from 'katex';
 import markedFootnote from 'marked-footnote';
+import { bareTasks } from './bare-tasks.js';
 
 let linkKind = () => 'note'; // target → 'note' | 'confluence' | 'api' | null (missing)
 export function setLinkResolver(fn) { linkKind = fn; }
@@ -72,7 +73,7 @@ marked.use({
 });
 
 export function renderMarkdown(md) {
-  return DOMPurify.sanitize(marked.parse(md), { ADD_ATTR: ['target'] });
+  return DOMPurify.sanitize(marked.parse(bareTasks(md)), { ADD_ATTR: ['target'] });
 }
 
 // ---------- mermaid (loaded lazily; it's big) ----------
