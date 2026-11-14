@@ -826,6 +826,55 @@ function renderSidebar() {
   tree('', 0);
   if (!S.notebooks.some((x) => x !== CONFLUENCE_ROOT && x !== API_ROOT)) wrap.append(el('div', 'hint', 'Notebooks are folders. Click + to add one.'));
 
+  // The Confluence section mirrors Confluence's page tree: every page is listed (not only pages with sub-pages),
+  // folders and pages together in title order. A page with sub-pages is a folder whose own page opens on click.
+  const cfTree = (parent, depth, target) => {
+    const books = S.notebooks.filter((x) => parentOf(x) === parent);
+    const pages = notes.filter((n) => n.notebook === parent && !isOwnPage(n, parent));
+    const items = [
+      ...books.map((nb) => ({ nb, label: leafOf(nb) })),
+      ...pages.map((n) => ({ n, label: n.title })),
+    ].sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }));
+    for (const it of items) {
+      if (it.n) {
+        const n = it.n;
+        const row = sideRow({
+          icon: ICON.note, label: n.title, depth,
+          active: n.path === S.current,
+          onClick: () => openNote(n.path),
+          onMenu: () => { openNote(n.path).then(() => noteMenu(n)); },
+        });
+        row.classList.add('cf-page-row');
+        row.prepend(el('span', 'chev')); // same indent as folders (they have a ▸ there)
+        if (S.cfChanged?.has(n.path)) row.classList.add('edited');
+        row.title = n.title;
+        target.append(row);
+        continue;
+      }
+      const nb = it.nb;
+      const own = notes.find((n) => n.notebook === nb && isOwnPage(n, nb));
+      const hasKids = S.notebooks.some((x) => parentOf(x) === nb) || notes.some((n) => n.notebook === nb && !isOwnPage(n, nb));
+      const open = S.expanded.has(nb);
+      const row = sideRow({
+        icon: own ? ICON.note : ICON.book, label: leafOf(nb), count: notes.filter((n) => inBook(n, nb)).length, depth,
+        active: (f.type === 'notebook' && f.name === nb) || (own && own.path === S.current),
+        onClick: () => { setFilter({ type: 'notebook', name: nb }); if (own) openNote(own.path); },
+        onMenu: () => notebookMenu(nb),
+      });
+      row.dataset.nb = nb;
+      row.title = own ? `${leafOf(nb)} — a page with sub-pages` : `${leafOf(nb)} — a Confluence folder`;
+      const chev = el('span', 'chev' + (open ? ' open' : ''));
+      if (hasKids) {
+        chev.innerHTML = ICON.chevron;
+        chev.addEventListener('click', (e) => { e.stopPropagation(); setExpanded(nb, !open); renderSidebar(); });
+      }
+      row.prepend(chev);
+      makeDropTarget(row, nb);
+      target.append(row);
+      if (hasKids && open) cfTree(nb, depth + 1, target);
+    }
+  };
+
   // API specs: every spec file + notes that contain one, and the "APIs" notebook.
   const apiBox = $('#apis');
   apiBox.textContent = '';
@@ -866,7 +915,7 @@ function renderSidebar() {
       }));
       cfBox.lastElementChild.classList.add('cf-changes-row');
     }
-    tree(CONFLUENCE_ROOT, 0, cfBox);
+    cfTree(CONFLUENCE_ROOT, 0, cfBox);
   } else {
     cfBox.append(el('div', 'hint', 'Click + to fetch pages from Confluence.'));
   }
@@ -1355,7 +1404,53 @@ async function noteMenu(n) {
   if (id === 'trash') trashNote(n.path);
 }
 
+// A page with sub-pages lives inside its own notebook ("Parent/Parent.md"); that note is the notebook's page.
+const segName = (t) => String(t).replace(/[\/\\:*?"<>|#\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80).replace(/^\.+/, '').trim();
+function isOwnPage(n, nb) {
+  return n.notebook === nb && nb !== CONFLUENCE_ROOT && (segName(n.title) === leafOf(nb) || n.title === leafOf(nb));
+}
+// The Confluence page to reload a notebook's tree from: its own page, or the nearest page above it.
+function refreshRootFor(nb) {
+  for (let x = nb; x && x !== CONFLUENCE_ROOT; x = parentOf(x)) {
+    const own = live().find((n) => isOwnPage(n, x) && confluenceInfo(n.meta)?.kind === 'page');
+    if (own) return own;
+  }
+  return null;
+}
+async function refreshConfluence(nb = CONFLUENCE_ROOT) {
+  let page = nb === CONFLUENCE_ROOT ? null : refreshRootFor(nb);
+  if (nb === CONFLUENCE_ROOT) {
+    const roots = S.notebooks.filter((x) => parentOf(x) === CONFLUENCE_ROOT).map(refreshRootFor).filter(Boolean);
+    const loose = live().filter((n) => n.notebook === CONFLUENCE_ROOT && confluenceInfo(n.meta)?.kind === 'page');
+    const all = [...new Map([...roots, ...loose].map((n) => [n.path, n])).values()];
+    if (!all.length) return toast('No fetched Confluence pages to refresh yet. Click + next to Confluence to fetch some.');
+    if (all.length === 1) page = all[0];
+    else {
+      const id = await api.popup([{ label: 'Refresh which page tree?', enabled: false }, ...all.map((n, i) => ({ id: String(i), label: n.title }))]);
+      if (id == null) return;
+      page = all[+id];
+    }
+  }
+  if (!page) return toast('Couldn’t find the Confluence page for this folder. Refresh from its parent page instead.');
+  confluence.openFetch(confluenceInfo(page.meta).url);
+}
+
 async function notebookMenu(nb) {
+  const isCf = nb === CONFLUENCE_ROOT || nb.startsWith(CONFLUENCE_ROOT + '/');
+  if (isCf) {
+    const id = await api.popup([
+      { id: 'refresh', label: nb === CONFLUENCE_ROOT ? 'Refresh All from Confluence…' : 'Refresh from Confluence…' },
+      { id: 'changes', label: 'Changes to Push…' },
+      { type: 'separator' },
+      { id: 'note', label: 'New Note Here' },
+      ...(nb === CONFLUENCE_ROOT ? [] : [{ type: 'separator' }, { id: 'delete', label: 'Delete…' }]),
+    ]);
+    if (id === 'refresh') refreshConfluence(nb);
+    if (id === 'changes') changesUI.open();
+    if (id === 'note') { setFilter({ type: 'notebook', name: nb }); newNote(); }
+    if (id === 'delete') deleteNotebook(nb);
+    return;
+  }
   const id = await api.popup([
     { id: 'note', label: 'New Note Here' },
     { id: 'sub', label: 'New Notebook Inside' },
@@ -1746,6 +1841,7 @@ const COMMANDS = [
   { id: 'empty-trash', title: 'Empty Trash', run: emptyTrash },
   { id: 'confluence-fetch', title: 'Fetch from Confluence…', when: () => !SINGLE, run: () => confluence.openFetch() },
   { id: 'confluence-push', title: 'Push to Confluence…', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.push() },
+  { id: 'confluence-refresh', title: 'Refresh Confluence Pages… (reload a page tree, incl. new pages)', when: () => !SINGLE, run: () => refreshConfluence(CONFLUENCE_ROOT) },
   { id: 'confluence-changes', title: 'Changes to Push to Confluence…', when: () => !SINGLE, run: () => changesUI.open() },
   { id: 'confluence-publish', title: 'Publish as a New Confluence Page…', when: () => !isTrashed() && !!currentNote() && !confluenceInfo(S.meta) && !isApi(), run: () => confluence.publishNote() },
   { id: 'confluence-pull', title: 'Pull Latest from Confluence', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.pull() },

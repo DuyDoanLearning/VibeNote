@@ -1046,3 +1046,7 @@ body.coding.agent-open:not(.comments-open) #agent-btn { display: none !important
 .mention-name { font-family: var(--sans); color: var(--text); font-weight: 600; max-width: 55%; overflow: hidden; text-overflow: ellipsis; }
 /* [[ picker: section headings (Projects / Notes / Confluence pages / API specs / Diagrams) */
 .cm-tooltip-autocomplete completion-section { display: block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); padding: 6px 10px 2px; border: 0 !important; opacity: 1 !important; }
+
+/* Confluence section: pages in the tree */
+.cf-page-row .label { color: var(--text); }
+.cf-page-row.edited .label::after { content: ' •'; color: #c2410c; font-weight: 800; }
