@@ -8,8 +8,9 @@ Built with Electron. Personal project; macOS only.
 
 | Version | What it has | Where |
 |---|---|---|
-| **Stable** | Notes, the Claude panel, Confluence, API specs | branch `main`, tags `v*-stable` (newest: `v1.1.0-stable`) |
-| **Experimental** | Everything in stable, plus Projects, the coding layout and draw.io diagrams | branch `agent` |
+| **Stable** | Notes, the Claude panel, Confluence, API specs, Projects, the coding layout and draw.io diagrams | branch `main`, tags `v*-stable` (newest: `v1.2.0-stable`) |
+| **Experimental** | Everything in stable, plus whatever is being tried next | branch `agent` |
+| Before Projects | Notes, the Claude panel, Confluence, API specs | tag `v1.1.0-stable` |
 | Notes only | The Markdown app before the Claude panel | tag `v1.0.2-stable` |
 
 Install any version into /Applications (notes and settings are not touched):
