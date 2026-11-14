@@ -150,10 +150,7 @@ const editor = createEditor({
     const safe = title.replace(/([\[\]])/g, '\\$1');
     editor.replaceNear(pos, url, `[${safe}](${url})`);
   },
-  getTitles: () => {
-    const seen = new Set();
-    return live().filter((n) => n.path !== S.current && !seen.has(n.title) && seen.add(n.title)).map((n) => ({ title: n.title, kind: kindOf(n) }));
-  },
+  getTitles: () => linkables().filter((x) => x.path !== S.current),
   // After [[Title# : endpoints of an API spec (also specs inside notes) and headings of a note
   getFragments: (title) => {
     const n = findByTitle(title);
@@ -166,7 +163,12 @@ const editor = createEditor({
   onSelection: () => comments?.selectionChanged(),
   onCommentClick: (id) => comments?.commentClicked(id),
 });
-setLinkResolver((target) => { const { note } = findByTarget(target); return note ? kindOf(note) : null; });
+setLinkResolver((target) => {
+  const special = specialTarget(target);
+  if (special) return special.found ? special.kind : null;
+  const { note } = findByTarget(target);
+  return note ? kindOf(note) : null;
+});
 const apiDocs = createApiDocs({ api, container: $('#apidocs'), onJump: (line) => editor.gotoLine(line), isDark: () => isDark() });
 
 // ---------- saving ----------
@@ -362,7 +364,44 @@ async function newNote(title, kind) {
   }
 }
 
+// Everything [[ links and @ mentions can point at: projects, notes, Confluence pages, API specs, diagrams.
+function linkables() {
+  const out = [];
+  const leaf = (nb) => (nb ? nb.split('/').pop() : 'Inbox');
+  for (const p of S.projects || []) out.push({ kind: 'project', title: p.name, insert: `project:${p.name}`, where: p.repo ? `Project · ${p.repo.split('/').pop()}` : 'Project', path: `${S.root}/${p.name}`, repo: p.repo || '' });
+  const seen = new Set();
+  for (const n of live()) {
+    if (seen.has(n.title)) continue;
+    seen.add(n.title);
+    const kind = kindOf(n);
+    out.push({ kind, title: n.title, insert: n.title, where: `${{ confluence: 'Confluence', api: 'API spec' }[kind] || 'Note'} · ${leaf(n.notebook)}`, path: n.path });
+  }
+  const dseen = new Set();
+  for (const d of [...(S.diagrams?.notes || []), ...(S.diagrams?.recent || [])]) {
+    if (dseen.has(d.path)) continue;
+    dseen.add(d.path);
+    out.push({ kind: 'diagram', title: d.name, insert: `diagram:${d.name}`, where: `Diagram · ${d.notebook ? leaf(d.notebook) : (d.folder || '').split('/').pop()}`, path: d.path });
+  }
+  return out;
+}
+
+// [[project:Name]] / [[diagram:Name]] → { kind, found, item }
+function specialTarget(target) {
+  const m = /^(project|diagram):\s*(.+)$/i.exec(String(target).trim());
+  if (!m) return null;
+  const kind = m[1].toLowerCase();
+  const name = m[2].trim().toLowerCase();
+  const item = linkables().find((x) => x.kind === kind && x.title.toLowerCase() === name);
+  return { kind, found: !!item, item, name: m[2].trim() };
+}
+
 async function openByTitle(target) {
+  const special = specialTarget(target);
+  if (special) {
+    if (!special.found) return toast(`No ${special.kind} called “${special.name}”.`);
+    if (special.kind === 'project') return projectUI.openHome(special.item.title);
+    return diagramUI.open(special.item.path);
+  }
   const { note: n, frag } = findByTarget(target);
   if (n) {
     if (!visibleNotes().includes(n)) setFilter({ type: 'all' });
@@ -1920,6 +1959,7 @@ const confluence = createConfluenceUI({
 let refreshSoon = null;
 const agentPanel = createAgentPanel({
   api,
+  getLinkables: () => linkables(),
   getContext: () => {
     const n = currentNote();
     if (S.code) return { notebook: S.project || '', notePath: S.code.tab === 'file' ? S.code.file : null, noteTitle: S.code.tab === 'file' && S.code.file ? `${S.code.file.split('/').pop()} (a code file, open in the viewer${S.code.line ? `, line ${S.code.line}` : ''})` : null };

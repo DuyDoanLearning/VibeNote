@@ -115,8 +115,11 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
   let readOnly = false;
   let silent = false;
 
-  // [[ → suggest note titles
-  const KIND_LABEL = { api: 'API spec', confluence: 'Confluence', note: '' };
+  // [[ → everything you can link to: projects, notes, Confluence pages, API specs, diagrams (grouped in sections)
+  const SECTIONS = {
+    project: { name: 'Projects', rank: 0 }, note: { name: 'Notes', rank: 1 }, confluence: { name: 'Confluence pages', rank: 2 },
+    api: { name: 'API specs', rank: 3 }, diagram: { name: 'Diagrams', rank: 4 },
+  };
   const wikiComplete = (ctx) => {
     const m = ctx.matchBefore(/\[\[[^\]\n]*/);
     if (!m) return null;
@@ -141,13 +144,14 @@ export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClic
     }
     return {
       from: m.from + 2,
-      options: getTitles().map(({ title, kind }) => ({
+      options: getTitles().map(({ title, kind, insert: ins, where }) => ({
         label: title,
-        detail: KIND_LABEL[kind] || '',
-        type: 'note',
+        detail: where || '',
+        type: kind === 'project' ? 'class' : kind === 'diagram' ? 'constant' : 'note',
+        section: SECTIONS[kind] || SECTIONS.note,
         apply: (view, _c, from, to) => {
           const end = view.state.sliceDoc(to, to + 2) === ']]' ? to + 2 : to;
-          const insert = title + ']]';
+          const insert = (ins || title) + ']]';
           view.dispatch({ changes: { from, to: end, insert }, selection: { anchor: from + insert.length } });
         },
       })),

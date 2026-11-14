@@ -20,7 +20,7 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - Each note is marked by type: **Note** (red), **Confluence** (blue) or **API** (green)
 - Search with filters: `tag:guide`, `book:Ideas`, `status:active`, `title:welcome`, `is:pinned`, `-tag:old`
 - The title lives in the big field above the editor; it's also the file name
-- Link notes with double brackets, like [[Welcome to VibeNote]] — also Confluence pages and API specs. Add `#` to go deeper: `[[Some note#A heading]]` or `[[My API#GET /users/{id}]]` (type `[[`, then `#`, to pick from a list)
+- Link with double brackets, like [[Welcome to VibeNote]] — type `[[` to pick a note, Confluence page, API spec, **project** or **diagram**. Add `#` to go deeper: `[[Some note#A heading]]` or `[[My API#GET /users/{id}]]` (type `[[`, then `#`, to pick from a list)
 - A note shows **🔗 Linked from** when other notes link to it. Links to Confluence pages you've fetched open your local copy (⌘-click for the browser)
 
 ## Confluence

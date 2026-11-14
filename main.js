@@ -1143,7 +1143,7 @@ ipcMain.handle('agent:unlink', (_e, key) => {
   closeProjectChats(key);
 });
 
-ipcMain.handle('agent:send', async (e, { notebook, text, notePath, noteTitle, label }) => {
+ipcMain.handle('agent:send', async (e, { notebook, text, notePath, noteTitle, label, mentions }) => {
   const project = projectFor(notebook);
   const state = await ensureChat(e.sender, project.key, project);
   const th = projectThreads(project.name).list.find((t) => t.id === project.thread);
@@ -1157,7 +1157,7 @@ ipcMain.handle('agent:send', async (e, { notebook, text, notePath, noteTitle, la
   state.items.push({ kind: 'user', text });
   const background = state.background ? `${state.background}\n\nThe conversation above happened earlier (in another app); continue from it.\n\n` : '';
   state.background = undefined;
-  state.lastSent = background + context + text;
+  state.lastSent = background + context + (typeof mentions === 'string' ? mentions : '') + text;
   state.chat.send(state.lastSent);
   return { key: project.key };
 });

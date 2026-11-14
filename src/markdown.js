@@ -38,7 +38,7 @@ marked.use({
       start: (src) => { const i = src.indexOf('[['); return i < 0 ? undefined : i; },
       tokenizer(src) {
         const m = /^\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/.exec(src);
-        if (m) return { type: 'wikilink', raw: m[0], target: m[1].trim(), text: m[2] ? m[2].trim() : m[1].trim().replace(/\s*#\s*/, ' › ') };
+        if (m) return { type: 'wikilink', raw: m[0], target: m[1].trim(), text: m[2] ? m[2].trim() : m[1].trim().replace(/^(project|diagram):\s*/i, '').replace(/\s*#\s*/, ' › ') };
       },
       renderer(tok) {
         const kind = linkKind(tok.target);

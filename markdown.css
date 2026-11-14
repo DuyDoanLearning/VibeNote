@@ -98,3 +98,7 @@
 .markdown .confluence-kept.has-picture .ck-label { font-weight: 500; color: var(--muted); font-size: .9em; text-align: center; }
 .markdown .confluence-kept .ck-show { margin-top: 6px; font: inherit; font-size: .9em; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--accent); cursor: pointer; }
 .markdown .confluence-kept .ck-show:hover { border-color: var(--accent); }
+
+/* links to projects and diagrams */
+.markdown a.wikilink.kind-project::before { content: '◆ '; color: var(--accent); font-size: .85em; }
+.markdown a.wikilink.kind-diagram::before { content: '◇ '; color: #ea580c; font-size: .9em; }

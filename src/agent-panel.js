@@ -1,6 +1,7 @@
 // The Claude chat panel: streaming replies, tool activity, Approve/Deny cards, questions, plans.
 import { renderMarkdown } from './markdown.js';
 import { createSlash, prettyModel } from './agent-slash.js';
+import { createMentions } from './agent-mention.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const el = (tag, cls, text) => {
@@ -40,7 +41,7 @@ const fmtSecs = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s
 // looks like a file path, optionally with a line: has a letter-led extension, no spaces
 const FILE_RE = /^(?:[\w@.~-]*\/)*[\w@.-]+\.[A-Za-z][A-Za-z0-9]{0,7}(?::\d+(?:[-:]\d+)?)?$/;
 
-export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChanged, openChats, onThreads, openFile, openChanges, toggleCoding }) {
+export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChanged, openChats, onThreads, openFile, openChanges, toggleCoding, getLinkables = () => [] }) {
   const root = document.getElementById('agent');
   root.innerHTML = `
     <div class="titlebar agent-head">
@@ -69,7 +70,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     <div class="agent-foot">
       <div class="agent-quick"></div>
       <div class="agent-input-wrap">
-        <textarea class="agent-input" rows="1" placeholder="Ask Claude… (/ for commands, ↵ to send, ⇧↵ new line)"></textarea>
+        <textarea class="agent-input" rows="1" placeholder="Ask Claude… (/ commands, @ mention a note or project, ↵ send)"></textarea>
         <button class="btn primary agent-send" title="Send (↵)">Send</button>
         <button class="btn agent-stop" title="Stop (Esc)" hidden>Stop</button>
       </div>
@@ -650,7 +651,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     autosize();
     setBusy(true);
     try {
-      await api.agent.send({ notebook: c.notebook, text, notePath: c.notePath, noteTitle: c.noteTitle, label });
+      await api.agent.send({ notebook: c.notebook, text, notePath: c.notePath, noteTitle: c.noteTitle, label, mentions: mentions.contextFor(text) });
       threadsSoon();
     } catch (e) {
       addError(e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
@@ -765,11 +766,13 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     status.textContent = 'Stopping…';
   });
   input.addEventListener('keydown', (e) => {
-    if (slash.onKey(e)) return;
+    if (mentions.onKey(e) || slash.onKey(e)) return;
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(input.value); }
   });
-  input.addEventListener('input', () => { autosize(); slash.onInput(); if (ctx?.busy) $('.agent-send').hidden = !input.value.trim(); });
-  input.addEventListener('blur', () => setTimeout(() => slash.close(), 150));
+  // @ → mention a project, note, Confluence page, API spec or diagram
+  const mentions = createMentions({ input, menuHost: $('.agent-foot'), getLinkables });
+  input.addEventListener('input', () => { autosize(); slash.onInput(); mentions.onInput(); if (ctx?.busy) $('.agent-send').hidden = !input.value.trim(); });
+  input.addEventListener('blur', () => setTimeout(() => { slash.close(); mentions.close(); }, 150));
   $('.agent-send').addEventListener('click', () => send(input.value));
   $('.agent-stop').addEventListener('click', () => { if (ctx) { userStopped = true; api.agent.stop(ctx.key); } });
   $('.agent-mode').addEventListener('change', (e) => setMode(e.target.value));
