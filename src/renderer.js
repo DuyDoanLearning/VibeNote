@@ -808,10 +808,12 @@ function renderSidebar() {
       const row = sideRow({
         icon: ICON.book, label: leafOf(nb), count: notes.filter((n) => inBook(n, nb)).length, depth,
         active: f.type === 'notebook' && f.name === nb,
-        onClick: () => setFilter({ type: 'notebook', name: nb }),
+        // A project's folder opens the project home page (its notes still show in the list).
+        onClick: () => (projectUI?.find(nb) ? projectUI.openHome(nb) : setFilter({ type: 'notebook', name: nb })),
         onMenu: () => notebookMenu(nb),
       });
       row.dataset.nb = nb;
+      if (projectUI?.find(nb)) row.title = `${leafOf(nb)} — click to open the project home page`;
       const chev = el('span', 'chev' + (open ? ' open' : ''));
       if (kids) {
         chev.innerHTML = ICON.chevron;
