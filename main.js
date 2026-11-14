@@ -2411,7 +2411,9 @@ async function syncGuide(force = false) {
   if (!force && g.created && !fs.existsSync(dest)) return null; // removed on purpose
   await fsp.mkdir(dest, { recursive: true });
   const hash = (s) => require('crypto').createHash('sha1').update(s).digest('hex');
-  const hashOf = (f) => { try { return hash(fs.readFileSync(f, 'utf8')); } catch { return ''; } };
+  // Same text apart from line endings / the final newline (VibeNote's own save may drop it) counts as unchanged.
+  const same = (text, h) => !!h && [text, text.trimEnd(), text.trimEnd() + '\n', text.replace(/\r\n/g, '\n').trimEnd() + '\n'].some((t) => hash(t) === h);
+  const untouched = (f) => { try { return same(fs.readFileSync(f, 'utf8'), g.files[path.basename(f)]); } catch { return false; } };
   for (const f of (await fsp.readdir(src)).filter((x) => x.endsWith('.md'))) {
     const shipped = await fsp.readFile(path.join(src, f), 'utf8');
     const target = path.join(dest, f);
@@ -2422,9 +2424,9 @@ async function syncGuide(force = false) {
       g.files[f] = hash(shipped);
       continue;
     }
-    const current = hash(await fsp.readFile(target, 'utf8'));
-    if (current === hash(shipped)) { g.files[f] = current; continue; }
-    if (known && current === known) { // untouched since we wrote it: update it
+    const currentText = await fsp.readFile(target, 'utf8');
+    if (same(currentText, hash(shipped))) { g.files[f] = hash(shipped); continue; }
+    if (known && same(currentText, known)) { // untouched since we wrote it: update it
       await snapshot(target, true, 'Before guide update').catch(() => {});
       await fsp.writeFile(target, shipped);
       g.files[f] = hash(shipped);
@@ -2436,7 +2438,7 @@ async function syncGuide(force = false) {
   const base = Date.now() / 1000;
   for (const f of files.sort((a, b) => rank(a) - rank(b))) {
     const full = path.join(dest, f);
-    if (hashOf(full) !== g.files[f] || (fs.statSync(full).mtimeMs < (g.stampedAt || 0))) continue; // edited or already ordered
+    if (!untouched(full) || (fs.statSync(full).mtimeMs < (g.stampedAt || 0))) continue; // edited or already ordered
     const t = base - (rank(f) + 2) * 60;
     await fsp.utimes(full, t, t).catch(() => {});
   }
