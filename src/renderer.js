@@ -1991,6 +1991,7 @@ diagramUI = createDiagramUI({
 
 projectUI = createProjectUI({
   openDiagram: (p) => diagramUI.open(p),
+  deleteDiagram: (p) => diagramUI.remove(p),
   newDiagram: (nb) => diagramUI.create(nb),
   closeDiagram: () => { codeUI.close(true); return diagramUI.close(true); },
   openCodeChanges: (repo) => codeUI.openChanges(repo),

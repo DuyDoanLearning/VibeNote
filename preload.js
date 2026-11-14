@@ -92,6 +92,7 @@ contextBridge.exposeInMainWorld('vibe', {
     create: invoke('diagrams:new'),
     pick: invoke('diagrams:pick'),
     forget: invoke('diagrams:forget'),
+    remove: invoke('diagrams:delete'),
     read: invoke('diagrams:read'),
     write: invoke('diagrams:write'),
     close: invoke('diagrams:close'),

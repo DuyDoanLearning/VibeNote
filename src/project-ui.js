@@ -287,6 +287,13 @@ export function createProjectUI(ctx) {
         if (d.where) li.append(chip(d.where, 'branch'));
         li.title = d.path;
         li.addEventListener('click', () => ctx.openDiagram(d.path));
+        li.addEventListener('contextmenu', async (e) => {
+          e.preventDefault();
+          const id = await api.popup([{ id: 'open', label: 'Open' }, { id: 'reveal', label: 'Reveal in Finder' }, { type: 'separator' }, { id: 'delete', label: 'Delete Diagram…' }]);
+          if (id === 'open') ctx.openDiagram(d.path);
+          if (id === 'reveal') api.diagrams.reveal(d.path);
+          if (id === 'delete' && (await ctx.deleteDiagram?.(d.path))) renderHome();
+        });
         gl.append(li);
       }
       gc.append(gl);

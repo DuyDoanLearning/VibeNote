@@ -17,6 +17,7 @@ export function createDiagramUI(ctx) {
       <span class="dg-status"></span>
       <button class="ph-small dg-reveal" title="Show the file in Finder">Reveal</button>
       <button class="ph-small dg-external" title="Open this file in the draw.io app">Open in draw.io</button>
+      <button class="ph-small dg-delete" title="Move this diagram to the Trash">Delete</button>
       <button class="icon dg-close" title="Close the diagram"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div class="dg-body"><div class="dg-msg"></div></div>`;
@@ -130,6 +131,23 @@ export function createDiagramUI(ctx) {
     if (!quiet) afterChange();
   }
 
+  // Delete a diagram (to the macOS Trash, after asking).
+  async function remove(path) {
+    const name = path.split('/').pop().replace(/\.drawio$/i, '');
+    if (!confirm(`Delete the diagram “${name}”?\n\nIt moves to the macOS Trash, so you can still get it back from there.`)) return false;
+    try {
+      if (S.diagram === path) await close(true);
+      await api.diagrams.remove(path);
+    } catch (e) {
+      toast(errText(e));
+      return false;
+    }
+    await reload();
+    afterChange();
+    toast(`Deleted “${name}” (it’s in the macOS Trash).`);
+    return true;
+  }
+
   async function reload() {
     try { S.diagrams = await api.diagrams.list(); } catch { S.diagrams = { notes: [], recent: [] }; }
   }
@@ -149,7 +167,8 @@ export function createDiagramUI(ctx) {
       b.addEventListener('click', () => open(d.path));
       b.addEventListener('contextmenu', async (e) => {
         e.preventDefault();
-        const id = await api.popup([{ id: 'reveal', label: 'Reveal in Finder' }, { id: 'ext', label: 'Open in draw.io' }, ...(d.folder ? [{ type: 'separator' }, { id: 'forget', label: 'Remove from This List' }] : [])]);
+        const id = await api.popup([{ id: 'reveal', label: 'Reveal in Finder' }, { id: 'ext', label: 'Open in draw.io' }, { type: 'separator' }, ...(d.folder ? [{ id: 'forget', label: 'Remove from This List' }] : []), { id: 'delete', label: 'Delete Diagram…' }]);
+        if (id === 'delete') remove(d.path);
         if (id === 'reveal') api.diagrams.reveal(d.path);
         if (id === 'ext') api.diagrams.openExternal(d.path);
         if (id === 'forget') { await api.diagrams.forget(d.path); await reload(); renderSide(); }
@@ -188,6 +207,7 @@ export function createDiagramUI(ctx) {
   $('.dg-close', view).addEventListener('click', () => close());
   $('.dg-reveal', view).addEventListener('click', () => S.diagram && api.diagrams.reveal(S.diagram));
   $('.dg-external', view).addEventListener('click', () => S.diagram && api.diagrams.openExternal(S.diagram));
+  $('.dg-delete', view).addEventListener('click', () => S.diagram && remove(S.diagram));
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
     if (!S.diagram || dark === isDark()) return;
     const x = lastXml;
@@ -195,5 +215,5 @@ export function createDiagramUI(ctx) {
     load(x);
   });
 
-  return { open, close, reload, renderSide, create, pick, addMenu };
+  return { open, close, reload, renderSide, create, pick, addMenu, remove };
 }

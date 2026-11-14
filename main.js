@@ -1374,6 +1374,15 @@ ipcMain.handle('diagrams:pick', async (e) => {
   saveConfig();
   return file;
 });
+// Delete = move to the macOS Trash (recoverable from Finder), and forget it in the recent list.
+ipcMain.handle('diagrams:delete', async (e, p) => {
+  const file = diagramFile(p);
+  unwatchDiagram(e.sender.id);
+  await shell.trashItem(file);
+  config.recentDiagrams = (config.recentDiagrams || []).filter((x) => x !== file);
+  saveConfig();
+  return true;
+});
 ipcMain.handle('diagrams:forget', (_e, p) => {
   config.recentDiagrams = (config.recentDiagrams || []).filter((x) => x !== path.resolve(String(p)));
   saveConfig();
