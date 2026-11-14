@@ -6,7 +6,7 @@ titles or ids, colleagues' names, company names) in it.
 
 ## Where things stand
 
-- `main` + newest tag **`v1.2.0-stable`** = the stable app. On 2026-11-14 the owner made everything below official
+- `main` + newest tag **`v1.2.1-stable`** = the stable app (v1.2.1: nested project Documents tree; v1.2.0 below). On 2026-11-14 the owner made everything below official
   (`agent` merged into `main`). `v1.1.0-stable` = before Projects; `v1.0.2-stable` = the last notes-only release.
 - **`agent`** = where new work starts; it is committed, pushed and installed on the owner's main Mac.
 - Before making a new stable release: merge `agent` → `main`, tag `vX.Y.Z-stable`, update the README version table.
