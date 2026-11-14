@@ -1107,3 +1107,11 @@ html[data-builtin-theme="lamplight"] :is(#editor .cm-scroller, #preview, #projec
 html[data-builtin-theme="lamplight"] :is(.btn.primary, .palette li.sel, .msg.user, .push-btn, .ph-small.primary, .pd-sel-x:hover) { color: #14171C; }
 html[data-builtin-theme="lamplight"] .msg.user a { color: #14171C; }
 html[data-builtin-theme="lamplight"] #comment-float { color: #14171C; box-shadow: 0 4px 14px rgba(242, 181, 68, .3), 0 1px 3px rgba(0, 0, 0, .3); }
+
+/* project page: Documents as a tree */
+.ph-tree { max-height: 460px; overflow-y: auto; margin-right: -6px; padding-right: 6px; }
+.ph-tree .ph-item { margin: 0; }
+.ph-chev { display: flex; width: 12px; color: var(--faint); cursor: pointer; transition: transform .12s; flex: 0 0 auto; }
+.ph-chev svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.4; }
+.ph-chev.open { transform: rotate(90deg); }
+.ph-folder .ph-item-title { font-weight: 600; }

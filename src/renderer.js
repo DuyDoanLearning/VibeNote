@@ -656,13 +656,16 @@ async function deleteNotebook(nb) {
 function visibleNotes() {
   const terms = parseQuery(S.query);
   const f = S.filter;
+  // A project's notebook also lists the documents added to the project (Confluence pages, other notebooks…).
+  const proj = f.type === 'notebook' && projectUI?.find(f.name);
+  const projDocs = proj ? new Set(projectUI.docsOf(proj).map((n) => n.path)) : null;
   const list = S.notes.filter((n) => {
     if (f.type === 'trash') { if (!n.trashed) return false; }
     else {
       if (n.trashed) return false;
       if (f.type === 'inbox' && n.notebook) return false;
       if (f.type === 'api' && n.kind !== 'api') return false;
-      if (f.type === 'notebook' && !inBook(n, f.name)) return false;
+      if (f.type === 'notebook' && !(projDocs ? projDocs.has(n.path) : inBook(n, f.name))) return false;
       if (f.type === 'tag' && !n.meta.tags.includes(f.name)) return false;
       if (f.type === 'status' && n.meta.status !== f.name) return false;
     }

@@ -11,6 +11,7 @@ const ICON = {
   book: '<svg viewBox="0 0 24 24"><path d="M5 4h12a2 2 0 012 2v14H7a2 2 0 01-2-2zM5 18a2 2 0 012-2h12"/></svg>',
   repo: '<svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="9" r="2.2"/><path d="M6 8.2v7.6M18 11.2c0 3-3 3.3-6 3.8-2 .3-4 .6-5 1.6"/></svg>',
   chat: '<svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
   diagram: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="6" rx="1"/><rect x="14" y="15" width="7" height="6" rx="1"/><rect x="3" y="15" width="7" height="6" rx="1"/><path d="M6.5 9v6M6.5 12h11v3"/></svg>',
 };
 const KIND_LABEL = { note: 'Note', confluence: 'Confluence', api: 'API spec' };
@@ -144,6 +145,94 @@ export function createProjectUI(ctx) {
     ctx.agent().noteChanged();
   }
 
+  // ---------- documents as a tree ----------
+  // The project's own notes at the top (sub-notebooks as folders), then one folder per added notebook / Confluence
+  // section, nested like in the sidebar. A Confluence page with sub-pages is a folder whose name opens the page.
+  const segName = (t) => String(t).replace(/[\/\\:*?"<>|#\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80).replace(/^\.+/, '').trim();
+  const openKey = (name) => `phDocsOpen:${name}`;
+  let treeScroll = 0;
+  function docTree(name, p, docs, since) {
+    const node = (label, key) => ({ label, key, folders: new Map(), pages: [], own: null });
+    const root = node('', '');
+    const place = (base, rel, n) => {
+      let at = base;
+      for (const seg of rel ? rel.split('/') : []) {
+        if (!at.folders.has(seg)) at.folders.set(seg, node(seg, `${at.key}/${seg}`));
+        at = at.folders.get(seg);
+      }
+      at.pages.push(n);
+    };
+    const tops = new Map(); // source → its folder at the top level
+    for (const n of docs) {
+      if (inBook(n, name)) { place(root, n.notebook === name ? '' : n.notebook.slice(name.length + 1), n); continue; }
+      const s = p.sources.find((x) => inSource(n, x));
+      if (!s || !S.notebooks.includes(s)) { root.pages.push(n); continue; } // a single added page
+      if (!tops.has(s)) tops.set(s, node(s.split('/').pop(), s));
+      place(tops.get(s), n.notebook === s ? '' : n.notebook.slice(s.length + 1), n);
+    }
+    // a page whose title is its folder's name is that folder's own page
+    const settle = (nd) => {
+      const i = nd.label ? nd.pages.findIndex((n) => n.title === nd.label || segName(n.title) === nd.label) : -1;
+      if (i >= 0) nd.own = nd.pages.splice(i, 1)[0];
+      for (const f of nd.folders.values()) settle(f);
+    };
+    settle(root);
+    for (const t of tops.values()) settle(t);
+    const count = (nd) => nd.pages.length + (nd.own ? 1 : 0) + [...nd.folders.values()].reduce((a, f) => a + count(f), 0);
+    const edited = (nd) => [nd.own, ...nd.pages].some((n) => n && S.cfChanged?.has(n.path)) || [...nd.folders.values()].some(edited);
+
+    let opened;
+    try { opened = new Set(ctx.load(openKey(name), null) || []); } catch { opened = new Set(); }
+    const firstTime = !ctx.load(openKey(name), null);
+    const isOpen = (nd, depth) => (firstTime ? depth === 0 : opened.has(nd.key));
+    const setOpen = (nd, v) => {
+      if (firstTime && !opened.size) for (const t of [...root.folders.values(), ...tops.values()]) opened.add(t.key); // keep the default
+      treeScroll = ul.scrollTop;
+      if (v) opened.add(nd.key); else opened.delete(nd.key);
+      store(openKey(name), [...opened]);
+      renderHome();
+    };
+
+    const ul = el('ul', 'ph-list ph-tree');
+    const pageRow = (n, depth) => {
+      const li = el('li', 'ph-item');
+      li.style.paddingLeft = `${6 + depth * 16 + 18}px`;
+      const k = kindOf(n);
+      li.append(iconEl(ICON[k]), el('span', 'ph-item-title', n.title || 'Untitled'));
+      li.title = n.title || 'Untitled';
+      if (S.cfChanged?.has(n.path)) li.append(chip('edited', 'warn'));
+      else if (since && n.mtime > since) li.append(chip('changed', 'new'));
+      li.append(el('span', 'ph-when', fmtDate(n.mtime)));
+      li.addEventListener('click', () => openNote(n.path));
+      ul.append(li);
+    };
+    const folderRow = (nd, depth, isSource) => {
+      const open = isOpen(nd, depth);
+      const li = el('li', 'ph-item ph-folder');
+      li.style.paddingLeft = `${6 + depth * 16}px`;
+      const chev = iconEl(ICON.chevron, 'ph-chev' + (open ? ' open' : ''));
+      const cf = [nd.own, ...nd.pages].some((n) => n && kindOf(n) === 'confluence') || nd.key.startsWith('Confluence');
+      const t = el('span', 'ph-item-title', nd.label);
+      li.append(chev, iconEl(nd.own ? ICON[kindOf(nd.own)] : cf ? ICON.confluence : ICON.book), t);
+      li.title = nd.own ? `${nd.label} — click the name to open the page, the arrow to fold` : isSource ? `${nd.key} (added to this project)` : nd.label;
+      if (edited(nd)) li.append(chip('edited', 'warn'));
+      li.append(el('span', 'ph-when', String(count(nd))));
+      chev.addEventListener('click', (e) => { e.stopPropagation(); setOpen(nd, !open); });
+      li.addEventListener('click', () => (nd.own ? openNote(nd.own.path) : setOpen(nd, !open)));
+      ul.append(li);
+      if (open) walk(nd, depth + 1);
+    };
+    const byName = (a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' });
+    function walk(nd, depth) {
+      for (const f of [...nd.folders.values()].sort(byName)) folderRow(f, depth, false);
+      for (const n of [...nd.pages].sort((a, b) => b.mtime - a.mtime)) pageRow(n, depth);
+    }
+    walk(root, 0);
+    for (const t of [...tops.values()].sort(byName)) folderRow(t, 0, true);
+    if (treeScroll) { const y = treeScroll; treeScroll = 0; requestAnimationFrame(() => { ul.scrollTop = y; }); }
+    return ul;
+  }
+
   // ---------- home page ----------
   let homeSeq = 0;
   const sinceFor = {}; // name → "last looked" time for this visit (so re-renders keep showing what's new)
@@ -243,20 +332,7 @@ export function createProjectUI(ctx) {
     const summary = [[counts.note, 'note'], [counts.confluence, 'Confluence page'], [counts.api, 'API spec']].filter(([c]) => c).map(([c, w]) => `${c} ${w}${c === 1 ? '' : 's'}`).join(' · ');
     const dc = card('ph-docs', 'Documents', small('Add…', () => addDocs(name)));
     dc.append(el('div', 'ph-sub2', summary || 'No documents yet.'));
-    const ul = el('ul', 'ph-list');
-    for (const n of docs.slice(0, 10)) {
-      const li = el('li', 'ph-item');
-      const k = kindOf(n);
-      li.append(iconEl(ICON[k]), el('span', 'ph-item-title', n.title || 'Untitled'));
-      if (S.cfChanged?.has(n.path)) li.append(chip('edited', 'warn'));
-      else if (since && n.mtime > since) li.append(chip('changed', 'new'));
-      if (k !== 'note') li.append(chip(KIND_LABEL[k]));
-      li.append(el('span', 'ph-when', fmtDate(n.mtime)));
-      li.addEventListener('click', () => openNote(n.path));
-      ul.append(li);
-    }
-    dc.append(ul);
-    if (docs.length > 10) dc.append(el('div', 'ph-more', `…and ${docs.length - 10} more in the note list`));
+    dc.append(docTree(name, p, docs, since));
     if (p.sources.length) {
       const src = el('div', 'ph-sources');
       src.append(el('span', 'ph-sources-label', 'Also includes:'));
