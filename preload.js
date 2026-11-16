@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('vibe', {
   save: invoke('note:save'),
   snapshot: invoke('note:snapshot'),
   create: invoke('note:create'),
+  htmlPreview: invoke('html:preview'),
   move: invoke('note:move'),
   trash: invoke('note:trash'),
   restore: invoke('note:restore'),

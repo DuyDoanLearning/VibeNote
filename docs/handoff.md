@@ -32,6 +32,14 @@ open directly from the home page. See `docs/workspace-spec.md` → Step 2 and CL
 isolated profile (open, save through the editor's message, outside change reloads, write guards, a real 67 KB
 diagram renders). Real keyboard shortcuts inside the editor could not be tested automatically.
 
+## 2026-11-16 (evening): HTML pages
+
+- A `.html` file in the notes folder is a note of kind `'html'` (like API specs: no front matter, title = file name, own extension; `rawKind()` / `RAW_META()` in main.js). Editor = CodeMirror HTML; the preview is the real page (`src/html-view.js`).
+- The page is served by `serveHtmlPages()` from `vibe-html://page/<absolute path>` (only files inside the notes folder, via `inRoot`) into an iframe with `sandbox="allow-scripts allow-popups allow-modals allow-forms"`, **never** `allow-same-origin`. Unsaved text is sent with `html:preview` (`htmlLive`), so the page updates while typing (reload 400 ms after typing stops).
+- A small script is appended to every served page: keeps the scroll position across reloads (`?y=`) and posts clicked http(s)/mailto links to the app, which opens them in the browser. (The frame itself can't navigate to a website: the app's CSP `frame-src` blocks it, so a `will-frame-navigate` handler never fires.)
+- Verified in an isolated profile: the page's `parent.api` / `parent.document` / `localStorage` / `fetch('secret.md')` are all blocked; relative pictures load; live update; saved exactly as typed; rename keeps `.html`; links open in the browser; switching to a normal note removes the frame.
+- Markdown notes keep stripping scripts from inline HTML (DOMPurify in `src/markdown.js`).
+
 ## 2026-11-14 (morning, owner's main Mac)
 
 - **VibeNote Guide**: a built-in project shipped in `guide/` and synced into `<notes>/VibeNote Guide` on start (`syncGuide` in main.js; per notes folder in `config.guides`). Untouched notes are refreshed when the shipped text changes; edited or deleted ones are respected; Help → VibeNote Guide (`open-guide`) restores it. **When a user-facing feature changes, update the matching `guide/` note** (as well as `welcome.md`).

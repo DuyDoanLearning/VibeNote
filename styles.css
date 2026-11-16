@@ -575,6 +575,17 @@ body.api-note #preview { display: none; }
 body.api-note #apidocs { display: block; overflow-y: auto; min-width: 0; min-height: 0; background: #fff; color: #3b4151; color-scheme: light; }
 #panes.edit #apidocs { display: none !important; }
 body.api-note #status-pick, body.api-note #tag-list, body.api-note #tag-input, body.api-note #image-btn { display: none; }
+
+/* ---------- HTML pages: HTML editor + the page itself in a sandboxed frame (src/html-view.js) ---------- */
+#htmlview { display: none; }
+body.html-note #preview { display: none; }
+body.html-note #htmlview { display: flex; min-width: 0; min-height: 0; background: #fff; color-scheme: light; }
+#panes.edit #htmlview { display: none !important; }
+.html-frame { flex: 1; width: 100%; height: 100%; border: 0; background: #fff; }
+body.html-note #status-pick, body.html-note #tag-list, body.html-note #tag-input, body.html-note #image-btn { display: none; }
+.api-badge.kind-html { background: #c2410c; }
+.bl-chip.kind-html::before { content: '</> '; font-size: 9px; font-weight: 800; color: #c2410c; }
+.mention-ico.k-html { color: #c2410c; font-size: 8.5px; font-weight: 800; }
 .apidocs .api-error { position: sticky; top: 0; z-index: 5; margin: 0; padding: 8px 14px; background: #fff7ed; color: #9a3412; border-bottom: 1px solid #fed7aa; font-size: 12.5px; cursor: pointer; }
 .apidocs .swagger-ui .wrapper { padding: 0 18px; max-width: none; }
 .apidocs .swagger-ui .information-container .info { margin: 22px 0 10px; }

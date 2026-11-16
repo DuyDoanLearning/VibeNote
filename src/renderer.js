@@ -10,6 +10,7 @@ import { createComments } from './comments.js';
 import { setupResizers } from './resize.js';
 import { createWriter } from './writer.js';
 import { createApiDocs } from './apidocs.js';
+import { createHtmlView } from './html-view.js';
 import { createChatsUI } from './chats-ui.js';
 import { createChangesUI } from './changes-ui.js';
 import { createProjectUI } from './project-ui.js';
@@ -94,7 +95,10 @@ const live = () => S.notes.filter((n) => !n.trashed);
 const currentNote = () => S.notes.find((n) => n.path === S.current);
 const isTrashed = () => !!currentNote()?.trashed;
 const isApi = () => currentNote()?.kind === 'api';
-const langOf = (n) => (n?.kind === 'api' ? (/\.json$/i.test(n.path) ? 'json' : 'yaml') : 'markdown');
+const isHtml = () => currentNote()?.kind === 'html';
+// API specs and HTML pages are code, kept exactly as typed (no front matter, tags or Markdown helpers).
+const isRaw = () => isApi() || isHtml();
+const langOf = (n) => (n?.kind === 'api' ? (/\.json$/i.test(n.path) ? 'json' : 'yaml') : n?.kind === 'html' ? 'html' : 'markdown');
 const isDark = () => matchMedia('(prefers-color-scheme: dark)').matches;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -104,7 +108,7 @@ function startsWithTitle(body, title) {
 }
 
 const API_ROOT = 'APIs'; // top-level notebook for API specs (own sidebar section)
-const kindOf = (n) => (n.kind === 'api' ? 'api' : confluenceInfo(n.meta) ? 'confluence' : 'note');
+const kindOf = (n) => (n.kind === 'api' || n.kind === 'html' ? n.kind : confluenceInfo(n.meta) ? 'confluence' : 'note');
 // [[Title#frag]] → { note, frag }. A title may itself contain '#', so try the whole thing first.
 function findByTarget(target) {
   const whole = findByTitle(target);
@@ -128,7 +132,7 @@ const editor = createEditor({
   parent: $('#editor'),
   // Inline suggestions: grey text when you pause at the end of a line (Tab accepts). Settings → Claude.
   suggest: {
-    canSuggest: () => S.settings.inlineSuggest !== false && !!S.current && !isApi() && !isTrashed() && S.mode !== 'preview' && !document.querySelector('.cw:not([hidden])'),
+    canSuggest: () => S.settings.inlineSuggest !== false && !!S.current && !isRaw() && !isTrashed() && S.mode !== 'preview' && !document.querySelector('.cw:not([hidden])'),
     getSuggestion: ({ before, after }) => api.suggest({ title: S.meta?.title || '', before, after }),
   },
   onChange(userEdit) {
@@ -157,7 +161,7 @@ const editor = createEditor({
     if (!n) return [];
     const ops = (n.kind === 'api' ? [n.body] : embeddedSpecs(n.body)).flatMap(apiOperations)
       .map((o) => ({ label: `${o.method} ${o.path}`, detail: o.summary, type: 'function' }));
-    const hs = n.kind === 'api' ? [] : mdHeadings(n.body).map((h) => ({ label: h.text, detail: 'H' + h.level, type: 'text' }));
+    const hs = n.kind === 'api' || n.kind === 'html' ? [] : mdHeadings(n.body).map((h) => ({ label: h.text, detail: 'H' + h.level, type: 'text' }));
     return [...ops, ...hs];
   },
   onSelection: () => comments?.selectionChanged(),
@@ -170,6 +174,7 @@ setLinkResolver((target) => {
   return note ? kindOf(note) : null;
 });
 const apiDocs = createApiDocs({ api, container: $('#apidocs'), onJump: (line) => editor.gotoLine(line), isDark: () => isDark() });
+const htmlView = createHtmlView({ api, container: $('#htmlview') });
 
 // ---------- saving ----------
 let saveTimer = null;
@@ -337,6 +342,7 @@ function closeNote() {
   S.dirty = false;
   editor.setDoc('');
   apiDocs.clear();
+  htmlView.clear();
   renderAll();
   updateTitle();
   comments?.noteOpened();
@@ -374,7 +380,7 @@ function linkables() {
     if (seen.has(n.title)) continue;
     seen.add(n.title);
     const kind = kindOf(n);
-    out.push({ kind, title: n.title, insert: n.title, where: `${{ confluence: 'Confluence', api: 'API spec' }[kind] || 'Note'} · ${leaf(n.notebook)}`, path: n.path });
+    out.push({ kind, title: n.title, insert: n.title, where: `${{ confluence: 'Confluence', api: 'API spec', html: 'HTML page' }[kind] || 'Note'} · ${leaf(n.notebook)}`, path: n.path });
   }
   const dseen = new Set();
   for (const d of [...(S.diagrams?.notes || []), ...(S.diagrams?.recent || [])]) {
@@ -680,6 +686,11 @@ function visibleNotes() {
 }
 
 function snippet(n) {
+  if (n.kind === 'html') {
+    // the words a reader sees on the page (not the <head>, scripts or styles)
+    const text = n.body.replace(/<head[\s>][\s\S]*?<\/head>/i, ' ').replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]*>/g, ' ');
+    return text.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim().slice(0, 200) || 'HTML page';
+  }
   if (n.kind === 'api') {
     const title = /^\s{2}title:\s*["']?(.+?)["']?\s*$/m.exec(n.body)?.[1] || 'OpenAPI spec';
     const ops = (n.body.match(/^\s+(get|post|put|patch|delete|head|options):\s*$/gm) || []).length;
@@ -764,7 +775,7 @@ function makeDropTarget(node, notebook) {
     e.preventDefault();
     const n = S.notes.find((x) => x.path === p);
     if (n?.trashed) return toast('Restore the note first');
-    if ((notebook === CONFLUENCE_ROOT || notebook.startsWith(CONFLUENCE_ROOT + '/')) && n && !confluenceInfo(n.meta) && n.kind !== 'api') {
+    if ((notebook === CONFLUENCE_ROOT || notebook.startsWith(CONFLUENCE_ROOT + '/')) && n && !confluenceInfo(n.meta) && n.kind !== 'api' && n.kind !== 'html') {
       return confluence.publishNote(n, notebook); // becomes a Confluence page there (the window asks before publishing)
     }
     moveNote(p, notebook);
@@ -966,8 +977,8 @@ function filterLabel() {
 
 // ---------- list sections (Arrange → Group by) ----------
 const GROUP_LABEL = { folder: 'notebook', tag: 'tag', type: 'type', none: 'nothing' };
-const KIND_LABEL = { note: 'Note', confluence: 'Confluence', api: 'API' };
-const TYPE_GROUPS = [['note', 'Notes'], ['confluence', 'Confluence pages'], ['api', 'API specs']];
+const KIND_LABEL = { note: 'Note', confluence: 'Confluence', api: 'API', html: 'HTML' };
+const TYPE_GROUPS = [['note', 'Notes'], ['confluence', 'Confluence pages'], ['api', 'API specs'], ['html', 'HTML pages']];
 const segs = (p) => (p ? p.split('/') : []);
 const cmpName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 function cmpPath(a, b) {
@@ -1180,6 +1191,8 @@ function renderToolbar() {
   if (chipFor) { pchip.lastElementChild.textContent = chipFor; pchip.title = `Part of the project “${chipFor}” — open its home page`; pchip.dataset.project = chipFor; }
   document.body.classList.toggle('in-trash', !!n?.trashed);
   document.body.classList.toggle('api-note', n?.kind === 'api');
+  document.body.classList.toggle('html-note', n?.kind === 'html');
+  if (n?.kind !== 'html') htmlView.clear(); // stop the page's scripts when another note opens
   const sel = $('#nb-select');
   sel.textContent = '';
   sel.append(new Option('Inbox', ''));
@@ -1192,7 +1205,7 @@ function renderToolbar() {
   $('#fwd-btn').disabled = !S.forward.length;
   // Push: update the Confluence page — or, for a normal note, publish it as a new page.
   const cfKind = confluenceInfo(S.meta)?.kind;
-  $('#push-btn').hidden = !n || !!n.trashed || n.kind === 'api' || (cfKind && cfKind !== 'page');
+  $('#push-btn').hidden = !n || !!n.trashed || n.kind === 'api' || n.kind === 'html' || (cfKind && cfKind !== 'page');
   $('#push-btn').title = cfKind ? 'Push your changes to Confluence' : 'Publish this note as a new Confluence page';
   $('#pin-btn').classList.toggle('on', !!S.meta?.pinned);
   $('#pin-btn').title = S.meta?.pinned ? 'Unpin note (⌥⌘P)' : 'Pin note (⌥⌘P)';
@@ -1264,6 +1277,7 @@ function schedulePreview() {
 async function renderPreview(force = false) {
   if ((S.mode === 'edit' && !force) || !S.current) return;
   if (isApi()) { apiDocs.show(S.currentId, editor.text()); return; }
+  if (isHtml()) { htmlView.show(S.current, editor.text()); return; }
   const seq = ++previewSeq;
   const tmp = document.createElement('div');
   const text = editor.text();
@@ -1484,14 +1498,19 @@ async function moreMenu() {
       { id: 'confluence-pull', label: 'Pull Latest from Confluence' },
       { id: 'confluence-open', label: 'Open in Confluence' },
     ] : []),
-    ...(!confluenceInfo(S.meta) && !isApi() ? [
+    ...(!confluenceInfo(S.meta) && !isRaw() ? [
       { type: 'separator' },
       { id: 'confluence-publish', label: 'Publish as a New Confluence Page…' },
     ] : []),
-    { type: 'separator' },
-    { id: 'export-html', label: 'Export as HTML…' },
-    { id: 'export-pdf', label: 'Export as PDF…' },
-    { id: 'print', label: 'Print…' },
+    ...(isHtml() ? [
+      { type: 'separator' },
+      { id: 'html-reload', label: 'Reload Page' },
+    ] : [
+      { type: 'separator' },
+      { id: 'export-html', label: 'Export as HTML…' },
+      { id: 'export-pdf', label: 'Export as PDF…' },
+      { id: 'print', label: 'Print…' },
+    ]),
     { type: 'separator' },
     { id: 'reveal', label: 'Reveal in Finder' },
     { id: 'trash', label: 'Move to Trash' },
@@ -1824,6 +1843,7 @@ const needNote = () => !!S.current && !isTrashed();
 const COMMANDS = [
   { id: 'new-note', title: 'New Note', key: '⌘N', run: () => newNote() },
   { id: 'new-api', title: 'New API Spec (Swagger / OpenAPI)', key: '⌥⌘N', run: () => newNote(undefined, 'api') },
+  { id: 'new-html', title: 'New HTML Page', run: () => newNote(undefined, 'html') },
   { id: 'new-notebook', title: 'New Notebook', key: '⇧⌘N', run: () => newNotebook(), when: () => !SINGLE },
   { id: 'search', title: 'Search Notes', key: '⇧⌘F', run: focusSearch },
   { id: 'palette', run: () => openPalette() },
@@ -1838,8 +1858,9 @@ const COMMANDS = [
   { id: 'copy-link', title: 'Copy Link to Note', key: '⌥⌘L', when: () => !!S.current, run: () => copyLink() },
   { id: 'history', title: 'Version History', key: '⌥⌘Y', when: needNote, run: openHistory },
   { id: 'open-window', title: 'Open Note in New Window', key: '⌥⌘O', when: () => !!S.current && !SINGLE, run: async () => { await save(); api.openWindow(S.current); } },
-  { id: 'export-html', title: 'Export as HTML', when: () => !!S.current && !isApi(), run: () => exportNote('html') },
-  { id: 'export-pdf', title: 'Export as PDF', key: '⇧⌘E', when: () => !!S.current && !isApi(), run: () => exportNote('pdf') },
+  { id: 'export-html', title: 'Export as HTML', when: () => !!S.current && !isRaw(), run: () => exportNote('html') },
+  { id: 'export-pdf', title: 'Export as PDF', key: '⇧⌘E', when: () => !!S.current && !isRaw(), run: () => exportNote('pdf') },
+  { id: 'html-reload', title: 'Reload HTML Page', when: () => isHtml(), run: () => htmlView.reload() },
   { id: 'print', title: 'Print', key: '⌘P', when: () => !!S.current, run: printNote },
   { id: 'reveal', title: 'Reveal Note in Finder', key: '⇧⌘R', when: () => !!S.current, run: () => api.reveal(S.current) },
   { id: 'trash', title: 'Move Note to Trash', when: needNote, run: () => trashNote(S.current) },
@@ -1851,7 +1872,7 @@ const COMMANDS = [
   { id: 'confluence-push', title: 'Push to Confluence…', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.push() },
   { id: 'confluence-refresh', title: 'Refresh Confluence Pages… (reload a page tree, incl. new pages)', when: () => !SINGLE, run: () => refreshConfluence(CONFLUENCE_ROOT) },
   { id: 'confluence-changes', title: 'Changes to Push to Confluence…', when: () => !SINGLE, run: () => changesUI.open() },
-  { id: 'confluence-publish', title: 'Publish as a New Confluence Page…', when: () => !isTrashed() && !!currentNote() && !confluenceInfo(S.meta) && !isApi(), run: () => confluence.publishNote() },
+  { id: 'confluence-publish', title: 'Publish as a New Confluence Page…', when: () => !isTrashed() && !!currentNote() && !confluenceInfo(S.meta) && !isRaw(), run: () => confluence.publishNote() },
   { id: 'confluence-pull', title: 'Pull Latest from Confluence', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.pull() },
   { id: 'confluence-open', title: 'Open in Confluence', when: () => !!confluenceInfo(S.meta), run: () => confluence.openInConfluence() },
   { id: 'confluence-pictures', title: 'Get Pictures from Confluence (images, draw.io)', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.downloadPictures() },
@@ -2159,7 +2180,7 @@ comments = createComments({
   closeAgent: () => { if (document.body.classList.contains('agent-open')) agentPanel.toggle(false); },
 });
 
-const writer = createWriter({ api, S, $, el, editor, isTrashed, toast, isDark, dirOf, isApi });
+const writer = createWriter({ api, S, $, el, editor, isTrashed, toast, isDark, dirOf, isApi, isHtml });
 
 // ```yaml / ```json OpenAPI blocks in a note's preview get an "API docs" button → Swagger in a big window.
 window.addEventListener('vibe:api-docs', (e) => {

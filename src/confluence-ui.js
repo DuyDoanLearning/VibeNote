@@ -344,7 +344,7 @@ export function createConfluenceUI(ctx) {
   }
 
   async function publishNote(note = currentNote(), presetNotebook = null) {
-    if (!note || note.trashed || note.kind === 'api') return;
+    if (!note || note.trashed || note.kind === 'api' || note.kind === 'html') return;
     const info = confluenceInfo(note.meta);
     if (info) { if (note.path === S.current) return push(); return toast('This note is already a Confluence page — open it and use Push.'); }
     if (note.path === S.current) await save();

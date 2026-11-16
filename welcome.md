@@ -40,6 +40,11 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - Select text first and press **⇧⌘J** to have Claude rewrite it (**Replace**). Type a new request in the box to adjust the result.
 - /claude and @Claude comments also know what you discussed in the **Claude panel** for that project (decisions, names, preferences). The box shows “+ your Claude chat (N messages)” — click it to turn that off.
 
+## HTML pages
+
+- ⌘K → **New HTML Page** makes a `.html` note: write HTML, CSS and JavaScript on the left, and the real page runs on the right as you type.
+- The page is sandboxed: its scripts run, but it can't see your notes or VibeNote. Pictures next to the page load by name; links to websites open in your browser.
+
 ## API specs (Swagger / OpenAPI)
 
 - **⌥⌘N** (or **+** next to **APIs** in the sidebar) creates an API spec: a pure `.yaml` page, marked **API** in the list.

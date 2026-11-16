@@ -60,6 +60,10 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - Claude editing an open diagram was verified live (Edit on the .drawio file → Allow card → the editor reloads).
 - Embed protocol: `?embed=1&proto=json`; the frame posts `init` / `autosave` / `save`, VibeNote posts `load` / `status`. Test trick: `win.webContents.mainFrame.framesInSubtree` finds the frame; post a fake `autosave` from inside it.
 
+## HTML pages (agent branch)
+- `.html` / `.htm` files are notes of kind `'html'`, handled like API specs (`rawKind()` in main.js: no front matter, title = file name, kept as typed). The preview is the live page (`src/html-view.js`), served by `serveHtmlPages()` through `vibe-html://page/<path>` (notes folder only).
+- **Safety rule:** the frame is `sandbox="allow-scripts allow-popups allow-modals allow-forms"`. Never add `allow-same-origin` — with it the page could reach `window.api` and every note. Links reach the browser through a `postMessage` from the script appended to each page.
+
 ## Code view and coding layout (agent branch)
 - `src/code-ui.js`: a fourth main-area state (`S.code`, `body.code-open`) with two tabs, Changes (parsed `git diff`) and File (read-only CodeMirror). Line comments are kept in memory and sent to the open chat with `agentPanel.ask`. `code:*` IPC in main.js is read-only and guarded by `repoDir()` / `codeFile()`.
 - Main-area states are exclusive: note, project home (`S.home`), diagram (`S.diagram`), code (`S.code`). Opening one closes the others (`closeOthers` / `beforeOpen` / `closeDiagram` hooks in renderer.js). Check all four when adding a fifth.

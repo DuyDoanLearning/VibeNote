@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: https: http:; font-src 'self' data:; frame-src vibe-drawio:">
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: https: http:; font-src 'self' data:; frame-src vibe-drawio: vibe-html:">
   <title>VibeNote</title>
   <link rel="stylesheet" href="dist/katex/katex.min.css">
   <link rel="stylesheet" href="styles.css">
@@ -156,6 +156,7 @@
         <div id="editor"></div>
         <article id="preview" class="markdown"></article>
         <div id="apidocs"></div>
+        <div id="htmlview"></div>
       </div>
       <div id="empty">
         <div class="empty-mark">✦</div>
