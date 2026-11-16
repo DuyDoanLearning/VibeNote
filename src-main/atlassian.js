@@ -12,7 +12,7 @@ import http from 'node:http';
 import path from 'node:path';
 
 // Two connections: 'main' (pages, comments — the tools VibeNote was built on) and 'files' (Atlassian's newer server,
-// used only to download page pictures: images and draw.io diagrams). Each has its own sign-in.
+// used for page pictures: downloading images and draw.io diagrams, uploading pictures pasted in a note). Each has its own sign-in.
 const SERVERS = { main: 'https://mcp.atlassian.com/v1/mcp', files: 'https://mcp.atlassian.com/v2/mcp' };
 const keyOf = (server, k) => (server === 'main' ? k : `${server}.${k}`); // 'main' keeps the original key names
 // Fixed loopback port: the redirect URL is registered with Atlassian once, so it must not change between runs.
@@ -175,6 +175,13 @@ export async function listTools(server = 'main') {
 export async function read(name, cloudId, inputs, { interactive = false } = {}) {
   try { await connect({ server: 'files', interactive }); } catch (e) { throw friendly(e); }
   const r = await call('executeRead', { name, cloudId, inputs }, 'files');
+  return r?.data ?? r;
+}
+
+/** Run a (non-destructive) write operation on the newer server, e.g. preparing a picture upload. */
+export async function write(name, cloudId, inputs, { interactive = false } = {}) {
+  try { await connect({ server: 'files', interactive }); } catch (e) { throw friendly(e); }
+  const r = await call('executeWrite', { name, cloudId, inputs }, 'files');
   return r?.data ?? r;
 }
 

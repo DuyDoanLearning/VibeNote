@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld('vibe', {
     mkdir: invoke('confluence:mkdir'),
     push: invoke('confluence:push'),
     create: invoke('confluence:create'),
+    upload: invoke('confluence:upload'),
     pictures: invoke('confluence:pictures'),
     openPicture: invoke('confluence:open-picture'),
   },

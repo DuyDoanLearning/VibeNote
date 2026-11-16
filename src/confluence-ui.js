@@ -1,6 +1,6 @@
 // Confluence sync UI: the "Fetch from Confluence" window (paste a link, tick pages), Push, Pull latest.
 // Conversion lives in confluence.js; network + files in main.js (confluence:* IPC). Spec: docs/confluence-spec.md.
-import { fromConfluence, toConfluence, confluenceInfo, withConfluenceInfo } from './confluence.js';
+import { fromConfluence, toConfluence, confluenceInfo, withConfluenceInfo, placePictures } from './confluence.js';
 
 export const CONFLUENCE_ROOT = 'Confluence'; // top-level notebook that holds fetched pages
 
@@ -232,6 +232,18 @@ export function createConfluenceUI(ctx) {
     return out;
   }
 
+  // Upload the note's pictures (r.uploads) to the page and put them into r.html. onMsg shows progress.
+  async function withPictures(r, { site, pageId, notePath }, onMsg) {
+    if (!r.uploads?.length) return r.html;
+    const figures = [];
+    for (const [i, u] of r.uploads.entries()) {
+      onMsg?.(r.uploads.length === 1 ? 'Uploading the picture…' : `Uploading pictures… (${i + 1} of ${r.uploads.length})`);
+      figures[i] = (await cf.upload({ site, pageId, notePath, src: u.src, alt: u.alt })).html;
+    }
+    return placePictures(r.html, figures);
+  }
+  const picturesLine = (r) => (r.uploads?.length ? `<li>🖼 <b>${r.uploads.length}</b> picture${r.uploads.length === 1 ? '' : 's'} from this note will be uploaded to the page.</li>` : '');
+
   // ---------- Push ----------
   async function push() {
     const note = currentNote();
@@ -255,6 +267,7 @@ export function createConfluenceUI(ctx) {
           ${!r.added && r.replaced ? `<li>🗑 <b>${r.replaced}</b> part${r.replaced === 1 ? '' : 's'} will be removed.</li>` : ''}
           <li>✅ <b>${r.kept}</b> unchanged part${r.kept === 1 ? '' : 's'} — including diagrams and macros — go back exactly as they are.</li>
           ${titleChanged ? `<li>🏷 Title: “${esc(side.title)}” → “${esc(title)}”</li>` : ''}
+          ${picturesLine(r)}
           ${r.problems.map((p) => `<li class="warn">⚠️ ${esc(p)}</li>`).join('')}
         </ul>
         <p class="cf-note">Confluence keeps the previous version in its page history, so this can be undone there.</p>
@@ -273,7 +286,9 @@ export function createConfluenceUI(ctx) {
       msg.textContent = draft ? 'Saving draft…' : 'Publishing…';
       msg.className = 'cf-msg wait';
       try {
-        const res = await cf.push({ site: info.site, id: info.id, title, html: r.html, version: info.version || side.version, draft });
+        const html = await withPictures(r, { site: info.site, pageId: info.id, notePath: note.path }, (t) => { msg.textContent = t; });
+        msg.textContent = draft ? 'Saving draft…' : 'Publishing…';
+        const res = await cf.push({ site: info.site, id: info.id, title, html, version: info.version || side.version, draft });
         if (res.conflict) {
           msg.className = 'cf-msg error';
           msg.textContent = `Someone changed this page in Confluence since you fetched it (it's now version ${res.current}, you have ${info.version || side.version}). Nothing was pushed. Copy your changes somewhere, use “Pull Latest from Confluence”, then add them again.`;
@@ -291,6 +306,7 @@ export function createConfluenceUI(ctx) {
         await refresh();
         if (path !== S.current) await openNote(path);
         toast(`Published to Confluence${res.version ? ` (version ${res.version})` : ''}.`);
+        if (r.uploads.length) picturesInBackground([info.id]); // show the uploaded pictures inside their 🔒 boxes
       } catch (e) {
         msg.className = 'cf-msg error';
         msg.textContent = 'Push failed: ' + errText(e);
@@ -350,6 +366,7 @@ export function createConfluenceUI(ctx) {
         <ul class="cf-summary">
           <li>📄 ${r.added ? `${body.split('\n').filter((l) => l.trim()).length} lines of content` : 'An empty page'}${fresh.meta.tags.length ? ' (tags stay in VibeNote)' : ''}.</li>
           <li>🔗 Afterwards the note moves into your Confluence notebooks and stays linked: edit it here and use <b>Push</b> to update the page.</li>
+          ${picturesLine(r)}
           ${r.problems.map((p) => `<li class="warn">⚠️ ${esc(p)}</li>`).join('')}
         </ul>
         <p class="cf-note">Everyone who can see the parent page will see the new page.</p>
@@ -396,7 +413,12 @@ export function createConfluenceUI(ctx) {
       msg.textContent = (await cf.status()) ? 'Publishing…' : 'Signing in to Atlassian… a browser tab opened. Sign in there and click Accept, then come back.';
       try {
         const title = fresh.meta.title || fresh.title || 'Untitled';
-        const created = await cf.create({ site, parentId, siblingId, title, html: r.html });
+        // Pictures can only be uploaded to a page that exists: create it without them, then add them.
+        const created = await cf.create({ site, parentId, siblingId, title, html: placePictures(r.html, []) });
+        if (r.uploads.length) {
+          const html = await withPictures(r, { site, pageId: created.id, notePath: fresh.path }, (t) => { msg.textContent = t; });
+          await cf.push({ site, id: created.id, title, html, version: created.version, draft: false });
+        }
         msg.textContent = 'Published. Linking the note…';
         // The note's new home: the parent page's notebook (a page that gets its first child gets its own notebook).
         if (parentNote) {
@@ -416,6 +438,7 @@ export function createConfluenceUI(ctx) {
         await refresh();
         await openNote(p);
         toast('Published to Confluence. The note is now linked to the new page.', 4000);
+        if (r.uploads.length) picturesInBackground([created.id]);
       } catch (e) {
         msg.className = 'cf-msg error';
         msg.textContent = 'Publish failed: ' + errText(e);
@@ -441,13 +464,15 @@ export function createConfluenceUI(ctx) {
         const r = toConfluence(body, side, { resolveLink });
         const title = fresh.meta.title || side.title;
         if (r.unchanged && title === side.title) { onStep(note, 'ok', 'Nothing to push'); continue; }
-        const res = await cf.push({ site: info.site, id: info.id, title, html: r.html, version: info.version || side.version, draft: false });
+        const html = await withPictures(r, { site: info.site, pageId: info.id, notePath: fresh.path }, (t) => onStep(note, 'wait', t));
+        const res = await cf.push({ site: info.site, id: info.id, title, html, version: info.version || side.version, draft: false });
         if (res.conflict) {
           onStep(note, 'conflict', `Someone changed it in Confluence meanwhile (now version ${res.current}) — not pushed. Open it and use Pull Latest.`);
           continue;
         }
         await fetchPage({ site: info.site, spaceKey: '', id: info.id, notebook: fresh.notebook, existing: fresh.path });
-        onStep(note, 'ok', `Pushed${res.version ? ` (version ${res.version})` : ''}${r.problems.length ? ` · ⚠️ ${r.problems.join(' ')}` : ''}`);
+        onStep(note, 'ok', `Pushed${res.version ? ` (version ${res.version})` : ''}${r.uploads.length ? ` · ${r.uploads.length} picture${r.uploads.length === 1 ? '' : 's'} uploaded` : ''}${r.problems.length ? ` · ⚠️ ${r.problems.join(' ')}` : ''}`);
+        if (r.uploads.length) picturesInBackground([info.id]);
       } catch (e) {
         onStep(note, 'error', errText(e));
       }

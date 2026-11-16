@@ -472,10 +472,25 @@ function convertRegion(text, side, replaced, opts = {}) {
       a.setAttribute('data-card-appearance', 'inline');
     }
   }
+  // Pictures on this Mac: a placeholder that Push swaps for the picture once it's uploaded to the page
+  // (opts.uploads collects them). A picture alone in its paragraph replaces the paragraph; one inside text goes
+  // right after that paragraph (Confluence pictures are blocks).
   for (const img of body.querySelectorAll('img')) {
-    if (/^https?:\/\//.test(img.getAttribute('src') || '')) continue;
-    problems.push(`Image “${img.getAttribute('alt') || img.getAttribute('src')}” is only on this Mac and can't be uploaded yet — it was left out.`);
-    img.remove();
+    const src = img.getAttribute('src') || '';
+    if (/^https?:\/\//.test(src)) continue;
+    if (!opts.uploads || /^[a-z][a-z0-9+.-]*:/i.test(src)) {
+      problems.push(`Image “${img.getAttribute('alt') || src}” is only on this Mac and can't be uploaded — it was left out.`);
+      img.remove();
+      continue;
+    }
+    let i = opts.uploads.findIndex((u) => u.src === src);
+    if (i < 0) i = opts.uploads.push({ src, alt: img.getAttribute('alt') || '' }) - 1;
+    const ph = doc.createElement('vibe-upload');
+    ph.setAttribute('data-u', String(i));
+    const p = img.closest('p');
+    if (p && !p.textContent.trim() && p.querySelectorAll('img').length === 1) p.replaceWith(ph);
+    else if (p) { img.remove(); p.after(ph); }
+    else img.replaceWith(ph);
   }
   for (const c of body.querySelectorAll('th[align], td[align]')) c.removeAttribute('align');
   // Drop the layout whitespace marked puts between tags (not inside text or code).
@@ -510,6 +525,7 @@ function convertRegion(text, side, replaced, opts = {}) {
  * Returns { html, kept, changed, added, removed, problems, unchanged }.
  */
 export function toConfluence(markdown, side, opts = {}) {
+  opts = { ...opts, uploads: [] };
   const blocks = side.blocks.map((b, bi) => ({ ...b, bi, olds: [], kept: false }));
   const oldLines = [];
   blocks.forEach((b) => b.md.split('\n').forEach((l) => { if (l.trim()) { b.olds.push(oldLines.length); oldLines.push(l.trimEnd()); } }));
@@ -569,7 +585,13 @@ export function toConfluence(markdown, side, opts = {}) {
     replaced: content.length - keptCount,
     added,
     problems,
+    uploads: opts.uploads, // [{ src, alt }]: pictures to upload; the html has <vibe-upload data-u="i"> where they go
   };
+}
+
+// Put the uploaded pictures (figure HTML per upload) where their placeholders are.
+export function placePictures(html, figures) {
+  return html.replace(/<vibe-upload data-u="(\d+)"><\/vibe-upload>/g, (_m, i) => figures[+i] || '');
 }
 
 // ---------- front matter helpers (sync info lives in the note's front matter "extra" lines) ----------

@@ -8,7 +8,7 @@
 // Note metadata (tags, status, pinned) lives in YAML front matter at the top of each file.
 // Revision history is local-only, in <userData>/history/<file inode>/<timestamp>.md.
 
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, net, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, net, protocol, nativeImage } = require('electron');
 // The bundled draw.io editor runs in a frame with its own origin (so it can load its files but not touch VibeNote).
 protocol.registerSchemesAsPrivileged([{ scheme: 'vibe-drawio', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 const path = require('path');
@@ -1801,7 +1801,7 @@ ipcMain.handle('confluence:save', async (_e, { notebook, existing, meta, body, s
     await fsp.mkdir(path.dirname(sc), { recursive: true });
     let old = {};
     try { old = JSON.parse(await fsp.readFile(sc, 'utf8')); } catch {}
-    await fsp.writeFile(sc, JSON.stringify({ ...sidecar, pictures: old.pictures, fileIds: old.fileIds }));
+    await fsp.writeFile(sc, JSON.stringify({ ...sidecar, pictures: old.pictures, fileIds: old.fileIds, uploads: old.uploads }));
   }
   await fsp.writeFile(file, serializeNote({ ...meta, title }, body, path.basename(file, '.md')), 'utf8');
   await snapshot(file, true, 'Confluence').catch(() => {});
@@ -2162,6 +2162,62 @@ ipcMain.handle('confluence:pictures', async (_e, id, { download = false, interac
   const key = String(id);
   if (!picturesBusy.has(key)) picturesBusy.set(key, downloadPictures(key, interactive).finally(() => picturesBusy.delete(key)));
   return picturesBusy.get(key);
+});
+
+// Upload a picture from the notes folder to a Confluence page (Push / Publish), through the newer server: it hands out
+// a short-lived upload link, VibeNote sends the file there. Returns the page HTML that shows the picture.
+// Uploads are remembered per page (by content), so pushing again — or after a refused push — doesn't upload twice.
+const PICTURE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.bmp': 'image/bmp', '.tif': 'image/tiff', '.tiff': 'image/tiff' };
+const escAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function pictureFigure(rec, alt) {
+  const w = rec.width > 0 ? Math.min(rec.width, 760) : 0;
+  return `<figure data-type="media-single" data-layout="center"${w ? ` data-width="${w}" data-width-type="pixel"` : ''}>`
+    + `<div data-type="media" data-media-type="file" data-id="${escAttr(rec.fileId)}" data-collection="${escAttr(rec.collection)}" data-alt="${escAttr(alt || rec.title)}"`
+    + `${rec.width > 0 ? ` data-width="${rec.width}" data-height="${rec.height}"` : ''}></div></figure>`;
+}
+ipcMain.handle('confluence:upload', async (_e, { site, pageId, notePath, src, alt }) => {
+  const pid = String(pageId);
+  if (!/^\d{1,19}$/.test(pid)) throw new Error('Bad page id');
+  const note = inRoot(notePath);
+  let rel = String(src || '');
+  try { rel = decodeURI(rel); } catch {}
+  if (!rel || /^[a-z][a-z0-9+.-]*:/i.test(rel)) throw new Error(`“${src}” isn’t a picture in your notes folder.`);
+  const file = inRoot(path.resolve(path.dirname(note), rel));
+  const type = PICTURE_TYPES[path.extname(file).toLowerCase()];
+  if (!type) throw new Error(`“${path.basename(file)}” isn’t a picture type Confluence shows (PNG, JPEG, GIF, WebP, SVG).`);
+  const st = await fsp.stat(file).catch(() => null);
+  if (!st?.isFile()) throw new Error(`The picture “${path.basename(file)}” isn’t on this Mac any more.`);
+  if (st.size > 50 * 1024 * 1024) throw new Error(`“${path.basename(file)}” is bigger than 50 MB.`);
+  const buf = await fsp.readFile(file);
+  const hash = require('crypto').createHash('sha1').update(buf).digest('hex');
+  let side = null;
+  try { side = await readSidecar(pid); } catch {}
+  const known = side?.uploads?.[hash];
+  if (known?.fileId) return { html: pictureFigure(known, alt), reused: true };
+
+  const atl = await loadAtlassian();
+  const prep = await atl.write('createConfluenceAttachment', site, { contentId: pid, localFilePath: path.basename(file), fileSize: buf.length }, { interactive: true });
+  let url;
+  try { url = new URL(prep?.uploadUrl); } catch {}
+  if (!url || url.protocol !== 'https:' || !/(^|\.)(atlassian\.net|atlassian\.com)$/.test(url.hostname) || !prep.mediaToken) {
+    throw new Error('Confluence didn’t give an upload link for the picture.');
+  }
+  const form = new FormData();
+  form.append('file', new Blob([buf], { type }), path.basename(file));
+  let res;
+  try {
+    res = await fetch(url, { method: 'POST', headers: { Accept: 'application/json', Authorization: `Bearer ${prep.mediaToken}` }, body: form, signal: AbortSignal.timeout(180_000) });
+  } catch (e) { throw new Error(`Couldn’t upload “${path.basename(file)}”: ${e.cause?.code || e.message}`); }
+  if (!res.ok) throw new Error(`Confluence refused the picture “${path.basename(file)}” (${res.status}).`);
+  const j = await res.json().catch(() => ({}));
+  if (!j.fileId) throw new Error('Confluence stored the picture but didn’t say where.');
+  const size = type === 'image/svg+xml' ? { width: 0, height: 0 } : nativeImage.createFromBuffer(buf).getSize();
+  const rec = { fileId: String(j.fileId), title: String(j.title || path.basename(file)), collection: `contentId-${pid}`, width: size.width, height: size.height };
+  if (side) {
+    side.uploads = { ...(side.uploads || {}), [hash]: rec };
+    await fsp.writeFile(sidecarPath(pid), JSON.stringify(side)).catch(() => {});
+  }
+  return { html: pictureFigure(rec, alt) };
 });
 
 ipcMain.handle('confluence:open-picture', async (_e, rel) => {

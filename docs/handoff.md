@@ -54,7 +54,8 @@ diagram renders). Real keyboard shortcuts inside the editor could not be tested 
 | **/claude and @Claude use the project's Claude panel chat** as background (switchable in the /claude box) | `panelChat()` in main.js | Newest ~16k chars of what was said, no tool output. |
 | **Live Claude panel** — thinking (summarised), steps as they start with one-line results, diffs, to-dos, helper progress, status line with time and tokens | `src-main/agent.js` handle(), `src/agent-panel.js` | `thinking: { type: 'adaptive', display: 'summarized' }`. |
 | **Claude Chats window** — past Claude Code chats per folder (Terminal / VS Code / app) **and T3 Code threads**; read, continue in the panel, save as note | `claude-chats.js`, `src/chats-ui.js`, `chats:*` IPC | Read-only on `~/.claude/projects` and `~/.t3/userdata/statev2.sqlite` (node:sqlite, readOnly). Continue = `resume` + `forkSession` in the chat's own folder. T3-only threads continue as a new chat with the old thread as background. |
-| **Confluence pictures** (images, draw.io) inside the 🔒 boxes | `downloadPictures` in main.js | Needs Atlassian's newer MCP server (`/v2/mcp`, its own one-time sign-in); files in `<notes>/.confluence/pictures/<pageId>/`. Real v2 sign-in untested by Claude (needs the owner's click). |
+| **Confluence pictures** (images, draw.io) inside the 🔒 boxes | `downloadPictures` in main.js | Needs Atlassian's newer MCP server (`/v2/mcp`, its own one-time sign-in); files in `<notes>/.confluence/pictures/<pageId>/`. The owner's real app is signed in to v2 (checked 2026-11-16). |
+| **Picture upload on Push / Publish** (pasted images → page attachments) | `confluence:upload` in main.js, `withPictures` in `src/confluence-ui.js`, placeholders in `src/confluence.js` | Tested live 2026-11-16 on a private scratch page in the owner's personal space: upload, placement, re-fetch as 🔒 box, picture download. |
 | Note list: group by notebook / tag / type, collapsible headings, Expand/Collapse all, Note / Confluence / API badges | `groupedNotes` etc. in renderer.js | |
 | Earlier: Confluence fetch/push, comments, API specs + Swagger/Reference, links/backlinks, edit history for people and Claude, /claude, resizable panes | see `docs/confluence-spec.md` and the git log | |
 
@@ -93,5 +94,6 @@ diagram renders). Real keyboard shortcuts inside the editor could not be tested 
 - #18 **Confluence sync & comments**: Sync button + periodic check that marks pages changed by others, Pull all;
   Confluence comments (footer + inline) in the comments panel with replies. Owner parked it.
 - #16 chats ↔ notes/code links, #17 project memory note (backlog).
-- Real end-to-end tests pending: Publish new page; pictures v2 sign-in.
+- Real end-to-end tests pending: Publish new page (picture upload on Publish uses the same path as Push, but Publish itself is still only stand-in tested).
+- Test profile gotcha: `scratchpad/atl-profile` once had a stale v1 `discovery` entry pointing at v2 ("Protected resource …/v2/mcp does not match expected …/v1/mcp"); clearing that key fixed it. The real profile was fine.
 - Known: Swagger docs are light-only; Node fetch ignores macOS proxy settings.
