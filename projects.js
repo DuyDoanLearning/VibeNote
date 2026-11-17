@@ -94,15 +94,19 @@ async function repoInfo(repo, since) {
   };
 }
 
-// "sources:" in the brief's front matter (kept verbatim in meta.extra by the note parser):
-//   sources:
+// Lists in the brief's front matter (kept verbatim in meta.extra by the note parser):
+//   sources:                      documents that live elsewhere but belong to the project
 //     - "Confluence/Space/Feature X"
-function parseSources(extra) {
+//   exclude:                      things inside the project the user left out of it (they stay where they are)
+//     - "Self-educate/Old drafts"   (a note, file or notebook in the notes folder)
+//     - "code:legacy-service"      (a repository or a diagram in the code folder, relative to it)
+const listRe = (key) => new RegExp(`^${key}:\\s*(\\[.*\\])?\\s*$`);
+function parseList(extra, key) {
   const lines = String(extra || '').split('\n');
-  const i = lines.findIndex((l) => /^sources:\s*(\[.*\])?\s*$/.test(l));
+  const i = lines.findIndex((l) => listRe(key).test(l));
   if (i < 0) return [];
   const out = [];
-  const inline = /^sources:\s*\[(.*)\]\s*$/.exec(lines[i]); // also accept the one-line form: sources: ["a", "b"]
+  const inline = new RegExp(`^${key}:\\s*\\[(.*)\\]\\s*$`).exec(lines[i]); // also the one-line form: key: ["a", "b"]
   if (inline) return inline[1].split(',').map((v) => v.trim().replace(/^"(.*)"$/, '$1')).filter(Boolean);
   for (let j = i + 1; j < lines.length; j++) {
     const m = /^\s+-\s+(.*)$/.exec(lines[j]);
@@ -114,17 +118,21 @@ function parseSources(extra) {
   return out;
 }
 
-function setSources(extra, list) {
+function setList(extra, key, list) {
   const lines = String(extra || '').split('\n').filter((l, i, a) => !(l === '' && a.length === 1));
-  const i = lines.findIndex((l) => /^sources:\s*(\[.*\])?\s*$/.test(l));
+  const i = lines.findIndex((l) => listRe(key).test(l));
   if (i >= 0) {
     let j = i + 1;
     while (j < lines.length && /^\s+-\s+/.test(lines[j])) j++;
     lines.splice(i, j - i);
   }
   const clean = [...new Set(list.map((s) => String(s).trim()).filter(Boolean))];
-  if (clean.length) lines.push('sources:', ...clean.map((s) => `  - ${JSON.stringify(s)}`));
+  if (clean.length) lines.push(`${key}:`, ...clean.map((s) => `  - ${JSON.stringify(s)}`));
   return lines.join('\n').trim();
 }
+const parseSources = (extra) => parseList(extra, 'sources');
+const setSources = (extra, list) => setList(extra, 'sources', list);
+const parseExclude = (extra) => parseList(extra, 'exclude');
+const setExclude = (extra, list) => setList(extra, 'exclude', list);
 
-module.exports = { BRIEF, BRIEF_TEMPLATE, git, findRepos, findFiles, repoInfo, parseSources, setSources };
+module.exports = { BRIEF, BRIEF_TEMPLATE, git, findRepos, findFiles, repoInfo, parseSources, setSources, parseExclude, setExclude };

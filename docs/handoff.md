@@ -72,6 +72,9 @@ Branched from `v1.3.0-stable` (= `main` = `agent` at `631dd54`).
 - Tests (isolated profiles, scratch harnesses): reading (local server + real Wikipedia) 26 checks, files 24 checks
   (a real pdf.js highlight via `annotationEditorUIManager.highlightSelection`, saved into the file and still there after
   reopening), plus smoke + HTML tests. Not installed on the owner's Mac yet.
+- **Remove from This Project** (owner's request): right-click on every document / folder / diagram / repository on the
+  project page and on notes in the list. Stored as `exclude:` in the brief (nothing moves); "Removed" row with ↩ to put
+  back; removed repos are hidden from chats (`agent:threads`, `code:repos`, system prompt). Test: 18 checks.
 - Next ideas: search inside PDFs (text extraction), PDF highlights in the Highlights view, a reading queue (Requests),
   Learning Notes database-like views (front matter fields as columns) for the Notion replacement.
 

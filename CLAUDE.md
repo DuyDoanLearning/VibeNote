@@ -52,6 +52,7 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - Project = top-level notebook with `Project brief.md` and/or `config.projects[name]` (code folder). `projectFor(notebook, thread?)` in main.js returns `{ name, repo, thread, key }`; **`name` is the project, `key` is the chat** (`name` for the first chat, `name#<id>` for the others) — don't mix them up.
 - Chats index: `userData/agent-chats/_threads.json`; each chat keeps its own file and (optional) `cwd` = the repository it is focused on. `state.pending` holds unanswered Allow/Deny cards so they can be shown again.
 - Extra documents: `sources:` list in the brief's front matter (kept in `meta.extra`; `projects.parseSources` / `setSources`). The renderer decides membership (`projectUI.projectOf(note)`), main only stores the list.
+- Removed from a project: `exclude:` list in the same front matter (`parseExclude` / `setExclude`, IPC `projects:set-exclude`): notes-folder paths (a note/file or a whole notebook) and `code:<rel>` for repositories / files in the code folder. Renderer: `leftOut` in `docsOf` / `projectOf` / `projectOfPath`; main: `keptRepos` / `codeLeftOut` filter the home page, `agent:threads`, `code:repos`, and the chat system prompt names them as "left out". Removing something that came from `sources` just takes it off that list.
 - `projects.js` runs git read-only with hooks/fsmonitor disabled. The home page is throttled (`homeSoon`) because it asks git for news.
 
 ## Diagrams (agent branch)

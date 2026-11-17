@@ -1498,10 +1498,12 @@ async function noteMenu(n) {
         { id: 'pin', label: n.meta.pinned ? 'Unpin' : 'Pin to Top' },
         { id: 'link', label: 'Copy Link' },
         { id: 'reveal', label: 'Reveal in Finder' },
+        ...(projectUI?.projectOf(n) ? [{ type: 'separator' }, { id: 'unproject', label: `Remove from Project “${projectUI.projectOf(n)}”` }] : []),
         { type: 'separator' },
         { id: 'trash', label: 'Move to Trash' },
       ];
   const id = await api.popup(items);
+  if (id === 'unproject') projectUI.removeNote(n);
   if (id === 'restore') restoreNote(n.path);
   if (id === 'delete') deleteForever(n.path);
   if (id === 'sub') addSubNote(n);
@@ -2339,6 +2341,7 @@ projectUI = createProjectUI({
   openChats: (target) => chatsUI.open(target),
   openChanges: () => changesUI.open(),
   rerenderList: () => renderList(),
+  afterProjectChange: () => renderAll(), // the list, sidebar counts and the note's project chip
 });
 
 comments = createComments({

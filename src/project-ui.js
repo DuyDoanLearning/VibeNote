@@ -39,25 +39,76 @@ export function createProjectUI(ctx) {
   };
 
   const inSource = (n, s) => inBook(n, s) || relOf(n) === s || relOf(n).replace(/\.[^./]+$/, '') === s;
-  const docsOf = (p) => live().filter((n) => inBook(n, p.name) || p.sources.some((s) => inSource(n, s)));
+  // Left out of the project by the user (the brief's "exclude" list): a note / file, or a whole notebook.
+  const leftOut = (p, n) => (p.exclude || []).some((e) => !e.startsWith('code:') && inSource(n, e));
+  const pathLeftOut = (p, rel) => (p.exclude || []).some((e) => !e.startsWith('code:') && (rel === e || rel.startsWith(e + '/')));
+  const codeLeftOut = (p, rel) => (p.exclude || []).some((e) => e.startsWith('code:') && (e === 'code:.' || rel === e.slice(5) || rel.startsWith(e.slice(5) + '/')));
+  const docsOf = (p) => live().filter((n) => (inBook(n, p.name) || p.sources.some((s) => inSource(n, s))) && !leftOut(p, n));
   const find = (name) => S.projects.find((p) => p.name === name);
 
   // Which project a note belongs to: its own notebook, or a project that lists it as a document.
   function projectOf(n) {
     if (!n) return null;
     const top = n.notebook.split('/')[0];
-    if (find(top)) return top;
-    const owners = S.projects.filter((p) => p.sources.some((s) => inSource(n, s)));
+    const tp = find(top);
+    if (tp && !leftOut(tp, n)) return top;
+    const owners = S.projects.filter((p) => p.sources.some((s) => inSource(n, s)) && !leftOut(p, n));
     return (owners.find((p) => p.name === S.project) || owners[0])?.name || null;
   }
 
   function projectOfPath(p) {
     if (p.startsWith(S.root + '/')) {
-      const top = p.slice(S.root.length + 1).split('/')[0];
-      if (find(top)) return top;
+      const rel = p.slice(S.root.length + 1);
+      const tp = find(rel.split('/')[0]);
+      if (tp && !pathLeftOut(tp, rel)) return tp.name;
     }
-    return S.projects.find((x) => x.repo && p.startsWith(x.repo + '/'))?.name || null;
+    return S.projects.find((x) => x.repo && p.startsWith(x.repo + '/') && !codeLeftOut(x, p.slice(x.repo.length + 1)))?.name || null;
   }
+
+  // ---------- remove from / put back into a project ----------
+  // Things inside the project go on the brief's "exclude" list; things added from elsewhere ("sources") just come
+  // off that list. Nothing is moved, renamed or deleted.
+  async function changed(name) {
+    await reload();
+    renderSide();
+    if (S.home === name) renderHome();
+    ctx.afterProjectChange?.();
+  }
+  async function leaveOut(name, entry, label) {
+    const p = find(name);
+    if (!p || (p.exclude || []).includes(entry)) return;
+    try { await api.projects.setExclude(name, [...(p.exclude || []), entry]); } catch (e) { return toast(errText(e)); }
+    await changed(name);
+    toast(`“${label}” is no longer part of ${name}. It stays where it is; put it back from the project page.`, 4500);
+  }
+  async function putBack(name, entry) {
+    const p = find(name);
+    if (!p) return;
+    await api.projects.setExclude(name, (p.exclude || []).filter((e) => e !== entry));
+    await changed(name);
+  }
+  async function dropSource(name, s, label) {
+    const p = find(name);
+    if (!p) return;
+    await api.projects.setSources(name, p.sources.filter((x) => x !== s));
+    await changed(name);
+    toast(`“${label}” is no longer part of ${name}. The pages themselves stay.`);
+  }
+  // A note / file: added from elsewhere → off the sources; inside the project → left out.
+  async function removeNote(n, name = projectOf(n)) {
+    const p = find(name);
+    if (!p) return;
+    const src = p.sources.find((s) => s === relOf(n) || s === relOf(n).replace(/\.[^./]+$/, ''));
+    if (src) return dropSource(name, src, n.title);
+    return leaveOut(name, relOf(n), n.title);
+  }
+  async function removeNotebook(name, nb, label) {
+    const p = find(name);
+    if (!p) return;
+    if (p.sources.includes(nb)) return dropSource(name, nb, label);
+    return leaveOut(name, nb, label);
+  }
+  const removeItem = { id: 'remove', label: 'Remove from This Project' };
 
   async function reload() {
     try { S.projects = await api.projects.list(); } catch { S.projects = []; }
@@ -206,6 +257,12 @@ export function createProjectUI(ctx) {
       else if (since && n.mtime > since) li.append(chip('changed', 'new'));
       li.append(el('span', 'ph-when', fmtDate(n.mtime)));
       li.addEventListener('click', () => openNote(n.path));
+      li.addEventListener('contextmenu', async (e) => {
+        e.preventDefault();
+        const id = await api.popup([{ id: 'open', label: 'Open' }, { type: 'separator' }, removeItem]);
+        if (id === 'open') openNote(n.path);
+        if (id === 'remove') removeNote(n, name);
+      });
       ul.append(li);
     };
     const folderRow = (nd, depth, isSource) => {
@@ -221,6 +278,13 @@ export function createProjectUI(ctx) {
       li.append(el('span', 'ph-when', String(count(nd))));
       chev.addEventListener('click', (e) => { e.stopPropagation(); setOpen(nd, !open); });
       li.addEventListener('click', () => (nd.own ? openNote(nd.own.path) : setOpen(nd, !open)));
+      li.addEventListener('contextmenu', async (e) => {
+        e.preventDefault();
+        const id = await api.popup([...(nd.own ? [{ id: 'open', label: 'Open' }, { type: 'separator' }] : []), { ...removeItem, label: 'Remove Folder from This Project' }]);
+        if (id === 'open') openNote(nd.own.path);
+        // folders inside the project have keys like "/Resources" (relative to it); added ones are full notebook paths
+        if (id === 'remove') removeNotebook(name, nd.key.startsWith('/') ? name + nd.key : nd.key, nd.label);
+      });
       ul.append(li);
       if (open) walk(nd, depth + 1);
     };
@@ -350,9 +414,25 @@ export function createProjectUI(ctx) {
       }
       dc.append(src);
     }
+    if (p.exclude?.length) {
+      const ex = el('div', 'ph-sources ph-removed');
+      ex.append(el('span', 'ph-sources-label', 'Removed:'));
+      for (const e of p.exclude) {
+        const c = el('span', 'ph-source');
+        const code = e.startsWith('code:');
+        c.append(document.createTextNode((code ? 'code · ' : '') + (code ? e.slice(5) : e.startsWith(name + '/') ? e.slice(name.length + 1) : e).replace(/\.md$/, '').split('/').slice(-2).join(' / ')));
+        c.title = `${code ? 'In the code folder: ' + e.slice(5) : e}. Not part of this project (it stays where it is).`;
+        const back = el('button', 'tag-x', '↩');
+        back.title = 'Put it back into this project';
+        back.addEventListener('click', () => putBack(name, e));
+        c.append(back);
+        ex.append(c);
+      }
+      dc.append(ex);
+    }
 
     // ----- diagrams -----
-    const mine = (S.diagrams?.notes || []).filter((d) => d.notebook === name || d.notebook.startsWith(name + '/'));
+    const mine = (S.diagrams?.notes || []).filter((d) => (d.notebook === name || d.notebook.startsWith(name + '/')) && !pathLeftOut(p, d.path.slice(S.root.length + 1)));
     const drawings = [...mine.map((d) => ({ ...d, where: '' })), ...(h.diagrams || []).map((d) => ({ ...d, where: d.rel.includes('/') ? d.rel.slice(0, d.rel.lastIndexOf('/')) : '' }))];
     const gc = card('ph-diagrams', 'Diagrams', small('New', () => ctx.newDiagram(name)));
     if (!drawings.length) {
@@ -367,8 +447,9 @@ export function createProjectUI(ctx) {
         li.addEventListener('click', () => ctx.openDiagram(d.path));
         li.addEventListener('contextmenu', async (e) => {
           e.preventDefault();
-          const id = await api.popup([{ id: 'open', label: 'Open' }, { id: 'reveal', label: 'Reveal in Finder' }, { type: 'separator' }, { id: 'delete', label: 'Delete Diagram…' }]);
+          const id = await api.popup([{ id: 'open', label: 'Open' }, { id: 'reveal', label: 'Reveal in Finder' }, { type: 'separator' }, removeItem, { id: 'delete', label: 'Delete Diagram…' }]);
           if (id === 'open') ctx.openDiagram(d.path);
+          if (id === 'remove') leaveOut(name, d.rel != null ? `code:${d.rel}` : d.path.slice(S.root.length + 1), d.name);
           if (id === 'reveal') api.diagrams.reveal(d.path);
           if (id === 'delete' && (await ctx.deleteDiagram?.(d.path))) renderHome();
         });
@@ -408,6 +489,14 @@ export function createProjectUI(ctx) {
         if (meta.childElementCount) li.append(meta);
         li.title = r.path;
         li.addEventListener('dblclick', () => api.projects.reveal(r.path));
+        li.addEventListener('contextmenu', async (e) => {
+          e.preventDefault();
+          const id = await api.popup([{ id: 'chat', label: 'New Chat on It' }, { id: 'changes', label: 'Review Changes' }, { id: 'reveal', label: 'Open in Finder' }, { type: 'separator' }, { ...removeItem, label: 'Remove Repository from This Project' }]);
+          if (id === 'chat') newChat(name, r.path);
+          if (id === 'changes') { S.project = name; ctx.openCodeChanges?.(r.path); }
+          if (id === 'reveal') api.projects.reveal(r.path);
+          if (id === 'remove') leaveOut(name, `code:${r.rel || '.'}`, r.rel || r.name);
+        });
         rl.append(li);
       }
       cc.append(rl);
@@ -678,5 +767,5 @@ export function createProjectUI(ctx) {
     }, 400);
   });
 
-  return { reload, renderSide, renderHome, openHome, newProject, addDocs, projectOf, projectOfPath, find, docsOf };
+  return { reload, renderSide, renderHome, openHome, newProject, addDocs, projectOf, projectOfPath, find, docsOf, removeNote };
 }

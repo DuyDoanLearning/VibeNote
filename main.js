@@ -1091,6 +1091,10 @@ function systemPromptFor(project, info = {}) {
   if (project.name && info.sources?.length) {
     lines.push(`- Documents that belong to this project but live elsewhere in the notes folder (specs, Confluence pages written by the business analyst, API specs): ${info.sources.map((s) => `"${path.join(root, s)}"`).join(', ')}. Read them when the task depends on requirements.`);
   }
+  if (project.name && info.exclude?.length) {
+    const where = (e) => (e.startsWith('code:') ? (project.repo ? path.join(project.repo, e.slice(5)) : e.slice(5)) : path.join(root, e));
+    lines.push(`- The user left these out of this project: ${info.exclude.map((e) => `"${where(e)}"`).join(', ')}. They are not part of it: don't read, use or change them for project work unless the user asks about them.`);
+  }
   if (project.name && info.brief) {
     lines.push(`- Project brief (the note "${path.join(root, project.name, projects.BRIEF)}"). Treat it as what you already know about this project, and add a line to its Decisions when a real decision is made:\n<project-brief>\n${info.brief}\n</project-brief>`);
   }
@@ -1392,21 +1396,27 @@ async function workspaceRepos(folder) {
 async function readBrief(name) {
   try {
     const { meta, body } = parseNote(await fsp.readFile(path.join(rootDir(), name, projects.BRIEF), 'utf8'));
-    return { meta, body, sources: projects.parseSources(meta.extra) };
+    return { meta, body, sources: projects.parseSources(meta.extra), exclude: projects.parseExclude(meta.extra) };
   } catch {
     return null;
   }
 }
+// Repositories the user left out of the project ("code:<rel>" in the brief's exclude list) are not shown or offered.
+const keptRepos = (repos, exclude = []) => repos.filter((r) => !exclude.includes(`code:${r.rel || '.'}`));
+// A file in the code folder (path relative to it) is left out if it, or a folder / repository it is in, is.
+const codeLeftOut = (exclude, rel) => exclude.some((e) => e.startsWith('code:') && (e === 'code:.' || rel === e.slice(5) || rel.startsWith(e.slice(5) + '/')));
+async function projectExclude(name) { return (await readBrief(name))?.exclude || []; }
 // What a project's chats are told up front: its repositories, its outside documents, and the brief.
 async function promptInfo(project, cwd) {
   const [repos, brief] = await Promise.all([workspaceRepos(project.repo), readBrief(project.name)]);
   const text = (brief?.body || '').trim();
-  return { repos, cwd, sources: brief?.sources || [], brief: text && text !== projects.BRIEF_TEMPLATE.trim() ? text.slice(0, 6000) : '' };
+  const exclude = brief?.exclude || [];
+  return { repos: keptRepos(repos, exclude), cwd, sources: brief?.sources || [], exclude, brief: text && text !== projects.BRIEF_TEMPLATE.trim() ? text.slice(0, 6000) : '' };
 }
 
 ipcMain.handle('agent:threads', async (_e, notebook) => {
   const project = projectFor(notebook);
-  return { name: project.name, ...threadList(project.name), repos: (await workspaceRepos(project.repo)).filter((r) => r.rel) };
+  return { name: project.name, ...threadList(project.name), repos: keptRepos(await workspaceRepos(project.repo), await projectExclude(project.name)).filter((r) => r.rel) };
 });
 ipcMain.handle('agent:thread-new', (_e, notebook, opts = {}) => {
   const project = projectFor(notebook);
@@ -1755,7 +1765,7 @@ const looksBinary = (buf) => buf.subarray(0, 8000).includes(0);
 
 ipcMain.handle('code:repos', async (_e, notebook) => {
   const project = projectFor(notebook);
-  const repos = await workspaceRepos(project.repo);
+  const repos = keptRepos(await workspaceRepos(project.repo), await projectExclude(project.name));
   const st = chats.get(project.key) || readChat(project.key);
   const focus = st.cwd || project.repo || null;
   const out = await Promise.all(repos.map(async (r) => {
@@ -1836,7 +1846,7 @@ async function listProjectsInfo() {
     if (!e.isDirectory() || e.name.startsWith('.') || !isProjectName(e.name)) continue;
     const linked = config.projects[e.name] || null;
     const brief = await readBrief(e.name);
-    out.push({ name: e.name, repo: linked, repoMissing: !!linked && !fs.existsSync(linked), hasBrief: !!brief, sources: brief?.sources || [] });
+    out.push({ name: e.name, repo: linked, repoMissing: !!linked && !fs.existsSync(linked), hasBrief: !!brief, sources: brief?.sources || [], exclude: brief?.exclude || [] });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 }
@@ -1869,6 +1879,24 @@ ipcMain.handle('projects:set-sources', async (_e, name, list) => {
   return projects.parseSources(meta.extra);
 });
 
+// Leave things out of a project / put them back: the brief's "exclude" list. Nothing is moved or deleted.
+ipcMain.handle('projects:set-exclude', async (_e, name, list) => {
+  const file = await ensureBrief(String(name));
+  const { meta, body } = parseNote(await fsp.readFile(file, 'utf8'));
+  const clean = [];
+  for (const s of Array.isArray(list) ? list : []) {
+    const v = String(s);
+    if (v.startsWith('code:')) { if (!v.slice(5).split('/').includes('..')) clean.push(v); continue; }
+    try { inRoot(v); clean.push(v); } catch {}
+  }
+  meta.extra = projects.setExclude(meta.extra, clean);
+  await fsp.writeFile(file, serializeNote(meta, body, baseOf(file)), 'utf8');
+  for (const [key, st] of chats) {
+    if ((key === name || key.startsWith(name + '#')) && !st.chat.busy) { st.chat.close(); chats.delete(key); }
+  }
+  return projects.parseExclude(meta.extra);
+});
+
 // Everything the project home page shows that the notes list doesn't already know.
 ipcMain.handle('projects:home', async (_e, name, markSeen) => {
   name = String(name || '');
@@ -1877,7 +1905,8 @@ ipcMain.handle('projects:home', async (_e, name, markSeen) => {
   config.projectSeen ||= {};
   const seenAt = config.projectSeen[name] || 0;
   const [brief, found] = await Promise.all([readBrief(name), workspaceRepos(project.repo)]);
-  const repos = await Promise.all(found.map((r) => projects.repoInfo(r, seenAt)));
+  const exclude = brief?.exclude || [];
+  const repos = await Promise.all(keptRepos(found, exclude).map((r) => projects.repoInfo(r, seenAt)));
   let past = [];
   if (project.repo) {
     try { past = (await claudeChats.listChats(project.repo, true)).slice(0, 8); } catch {}
@@ -1891,9 +1920,11 @@ ipcMain.handle('projects:home', async (_e, name, markSeen) => {
     briefPath: brief ? path.join(rootDir(), name, projects.BRIEF) : null,
     brief: text === projects.BRIEF_TEMPLATE.trim() ? '' : text.slice(0, 4000),
     sources: brief?.sources || [],
+    exclude,
     repos,
     past,
-    diagrams: project.repo ? (await projects.findFiles(project.repo, /\.drawio$/i, 4, 40)).map((f) => ({ path: f, name: path.basename(f).replace(/\.drawio$/i, ''), rel: path.relative(project.repo, f) })) : [],
+    diagrams: project.repo ? (await projects.findFiles(project.repo, /\.drawio$/i, 4, 40)).map((f) => ({ path: f, name: path.basename(f).replace(/\.drawio$/i, ''), rel: path.relative(project.repo, f) }))
+      .filter((d) => !codeLeftOut(exclude, d.rel)) : [],
     threads: threadList(name),
     seenAt,
   };

@@ -104,6 +104,7 @@ contextBridge.exposeInMainWorld('vibe', {
     create: invoke('projects:create'),
     home: invoke('projects:home'),
     setSources: invoke('projects:set-sources'),
+    setExclude: invoke('projects:set-exclude'),
     reveal: invoke('projects:reveal'),
   },
   diagrams: {
