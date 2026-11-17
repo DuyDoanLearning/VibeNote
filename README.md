@@ -37,6 +37,8 @@ scripts/install-version.sh <commit>        # anything else
 - Version history per note that shows who changed what (you, Claude, Confluence); in-app Trash with restore
 - Note list grouped by notebook / tag / type; resizable panes
 - Export to HTML / PDF, print
+- **Reading desk**: save a web article as a clean Markdown note (Readability + Turndown, formulas kept as math) or a PDF link as the PDF; highlight from the preview; a Highlights view across all notes
+- **Files with the notes**: PDF (pdf.js viewer; highlights saved into the PDF), Word and Excel (read-only views, "make a note from it"); add files or drop them from Finder
 - **HTML pages**: a `.html` note shows as a live web page beside its source, scripts included, in a sandboxed frame (`vibe-html://`, no access to the app or other notes)
 - Themes: built-in light/dark, **any VS Code colour theme** installed on the machine, “Same as VS Code”, or import `.json` / `.vsix`
 - Vim key bindings, line numbers, spell check, font / width settings
@@ -132,6 +134,8 @@ The notes folder is self-contained, so it can be synced between Macs (iCloud Dri
 | `src/ghost.js` | Inline suggestions while writing |
 | `src/confluence*.js`, `src/changes-ui.js`, `src-main/atlassian.js` | Confluence fetch / push / publish, “Changes to push” |
 | `src/apidocs.js`, `src/links.js` | API spec docs (Swagger / Reference), links between notes, pages and specs |
+| `src/reading.js` | Reading desk: save web pages, highlight from the preview, Highlights view |
+| `src/file-view.js` | PDF (pdf.js in `vibe-pdf://`), Word and Excel viewers |
 | `src/html-view.js` | HTML pages: the sandboxed live page beside the source (served by `serveHtmlPages` in main.js) |
 | `src/comments.js`, `src/writer.js` | Comments with @Claude; /claude writing at the cursor |
 | `src/chats-ui.js` | Claude Chats window: browse past chats, continue one, save as a note |

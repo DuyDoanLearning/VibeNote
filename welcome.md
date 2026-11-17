@@ -42,6 +42,12 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - Select text first and press **⇧⌘J** to have Claude rewrite it (**Replace**). Type a new request in the box to adjust the result.
 - /claude and @Claude comments also know what you discussed in the **Claude panel** for that project (decisions, names, preferences). The box shows “+ your Claude chat (N messages)” — click it to turn that off.
 
+## Reading desk
+
+- **⇧⌘L** saves a web page: an article becomes a clean note in **Reading**; a PDF link saves the PDF.
+- In the preview, select text → **Highlight**. ⌘K → **Highlights** shows them all.
+- **Add Files…** (or drag from Finder onto the list) keeps PDFs, Word and Excel files with your notes. Highlight PDFs right in VibeNote; turn a Word file or an Excel sheet into a note.
+
 ## HTML pages
 
 - ⌘K → **New HTML Page** makes a `.html` note: write HTML, CSS and JavaScript on the left, and the real page runs on the right as you type.

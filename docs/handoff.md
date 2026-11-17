@@ -44,6 +44,37 @@ diagram renders). Real keyboard shortcuts inside the editor could not be tested 
 - Tested live under the owner's private scratch page (test profile + throwaway notes): first publish (2 folders, 3 pages, a picture, private top folder), a simulated failure after page creation (retry pushed to the same page, no duplicate), a second publish (remembered folders, one edited note pushed, one new note added), and a notebook rename (folder link follows).
 - Also fixed for every Push: a list mixing bullets and to-dos is split before sending (Confluence rejected it).
 
+## 2026-11-17 (evening): reading desk — branch `reading` (experiment, not merged)
+
+The owner cancelled Readwise and wants VibeNote to gather learning resources ("can even replace Notion in some part").
+Branched from `v1.3.0-stable` (= `main` = `agent` at `631dd54`).
+
+- **Save Web Page** (⇧⌘L, `src/reading.js`): `web:fetch` (main, net.fetch) → the renderer runs Mozilla Readability on an
+  inert `DOMParser` document (page scripts never run) → Turndown (+ `@joplin/turndown-plugin-gfm`) → `web:save-article`
+  writes the note (front matter: `tags: [reading]`, `source`, `site`, `author`, `published`, `saved`). Formulas are swapped
+  for placeholders *before* Readability (it strips their markers) and come back as `$…$`: MathML `alttext`, Wikipedia's
+  `data-mw` `extsrc`, KaTeX `<annotation>`, MathJax `script[type^=math/tex]`. A PDF response is saved as the `.pdf`.
+- **Highlight from the preview**: `findInSource` maps the preview selection to the Markdown (words joined by a regex
+  that skips Markdown syntax; nearest occurrence to the same relative position; head+tail fallback for long selections
+  across formulas/pictures); `addHighlight` widens to whole words, balances `**`/`~~`/`` ` ``/links, wraps per line, skips
+  code fences, tables and picture lines. `==highlight==` may now contain a single `=` (`src/markdown.js`).
+- **Files** (`src/file-view.js`): `.pdf/.docx/.xlsx` are note-list items of kind `pdf|docx|xlsx` (`fileKind()` in main.js).
+  Never read/written as text: `readNote` gives `body: ''`, `note:save` only renames, `snapshot` skips them, `note:discard`
+  only ever deletes `.md`. Renderer: `isRaw()` = any kind (not Markdown); `body.file-note` hides editor/preview.
+  - PDF: pdf.js generic viewer 6.5.438 downloaded by `build.mjs` (pinned + SHA-256, cached like draw.io) into
+    `dist/pdfjs`, served by `servePdfViewer()` via `vibe-pdf://viewer/web/viewer.html?file=/doc/<path>` with a CSP
+    (no outside connections). `PDF_PATCH_JS` (served as `web/vibenote-patch.js`) turns off PDF scripting, sends links to
+    the browser, and autosaves: polls `PDFViewerApplication._annotationStorageModified` → `pdfDocument.saveDocument()` →
+    postMessage → `files:save-pdf` (checks `%PDF-`, keeps the original once in `<userData>/pdf-originals/`, atomic write).
+  - Word: mammoth → DOMPurify → shown; Excel: `read-excel-file/universal`; "make a note" uses `web:save-article` with
+    `tags: ['imported']`, `from-file`, `sheet`.
+  - `files:import` (Add Files…, or drop from Finder on `#list` — paths via `webUtils.getPathForFile` in preload).
+- Tests (isolated profiles, scratch harnesses): reading (local server + real Wikipedia) 26 checks, files 24 checks
+  (a real pdf.js highlight via `annotationEditorUIManager.highlightSelection`, saved into the file and still there after
+  reopening), plus smoke + HTML tests. Not installed on the owner's Mac yet.
+- Next ideas: search inside PDFs (text extraction), PDF highlights in the Highlights view, a reading queue (Requests),
+  Learning Notes database-like views (front matter fields as columns) for the Notion replacement.
+
 ## 2026-11-16 (evening): HTML pages
 
 - A `.html` file in the notes folder is a note of kind `'html'` (like API specs: no front matter, title = file name, own extension; `rawKind()` / `RAW_META()` in main.js). Editor = CodeMirror HTML; the preview is the real page (`src/html-view.js`).

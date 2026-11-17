@@ -61,6 +61,11 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - Claude editing an open diagram was verified live (Edit on the .drawio file → Allow card → the editor reloads).
 - Embed protocol: `?embed=1&proto=json`; the frame posts `init` / `autosave` / `save`, VibeNote posts `load` / `status`. Test trick: `win.webContents.mainFrame.framesInSubtree` finds the frame; post a fake `autosave` from inside it.
 
+## Reading desk and files (branch `reading`)
+- `src/reading.js`: Save Web Page (Readability on an inert DOMParser doc → Turndown), highlight from the preview, Highlights view. `src/file-view.js`: PDF (pdf.js in `vibe-pdf://`), Word (mammoth), Excel (read-excel-file).
+- `.pdf/.docx/.xlsx` are note-list items with `kind` set (`fileKind()` in main.js). **Never read or write them as text**: they have `body: ''`, `note:save` only renames, no snapshots, and `note:discard` only deletes `.md`. In the renderer `isRaw()` / `n.kind` means "not a Markdown note" — use `!n.kind` for Markdown-only features.
+- PDF highlights are written into the PDF by the viewer patch (`PDF_PATCH_JS`) through `files:save-pdf`, which keeps the first original in `<userData>/pdf-originals/`. To update pdf.js: change `PDFJS.version` + `sha256` in build.mjs and re-run the files test.
+
 ## HTML pages (agent branch)
 - `.html` / `.htm` files are notes of kind `'html'`, handled like API specs (`rawKind()` in main.js: no front matter, title = file name, kept as typed). The preview is the live page (`src/html-view.js`), served by `serveHtmlPages()` through `vibe-html://page/<path>` (notes folder only).
 - **Safety rule:** the frame is `sandbox="allow-scripts allow-popups allow-modals allow-forms"`. Never add `allow-same-origin` — with it the page could reach `window.api` and every note. Links reach the browser through a `postMessage` from the script appended to each page.
