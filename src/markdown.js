@@ -31,7 +31,8 @@ marked.use({
       level: 'inline',
       start: (src) => { const i = src.indexOf('=='); return i < 0 ? undefined : i; },
       tokenizer(src) {
-        const m = /^==(?=\S)([^=\n]*?\S)==/.exec(src);
+        // A single = may appear inside (formulas: ==Var(X) = E[X²] − μ²==); == closes it.
+        const m = /^==(?=\S)((?:[^=\n]|=(?!=))*?\S)==/.exec(src);
         if (m) return { type: 'highlight', raw: m[0], tokens: this.lexer.inlineTokens(m[1]) };
       },
       renderer(tok) { return `<mark>${this.parser.parseInline(tok.tokens)}</mark>`; },

@@ -920,6 +920,56 @@ ipcMain.handle('link:title', async (_e, url) => {
   }
 });
 
+// ---------- reading: save a web page (an article as a note, or a PDF as a file) into a notebook ----------
+// The page's HTML goes back to the renderer, which pulls out the article (Readability, in an inert DOMParser
+// document: no scripts run) and turns it into Markdown; web:save-article then writes the note.
+const WEB_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 VibeNote/1.0';
+ipcMain.handle('web:fetch', async (_e, url, notebook) => {
+  if (!/^https?:\/\//i.test(String(url))) throw new Error('Paste a link that starts with http:// or https://');
+  let res;
+  try {
+    res = await net.fetch(url, { signal: AbortSignal.timeout(30000), headers: { 'User-Agent': WEB_UA, Accept: 'text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.5' } });
+  } catch (e) {
+    throw new Error(`Could not reach ${new URL(url).host}: ${e.cause?.message || e.message}`);
+  }
+  if (!res.ok) throw new Error(`The site answered ${res.status} ${res.statusText || ''}`.trim());
+  const finalUrl = res.url || url;
+  const type = res.headers.get('content-type') || '';
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > 100e6) throw new Error('That file is bigger than 100 MB.');
+  if (/application\/pdf/i.test(type) || buf.subarray(0, 5).toString('latin1') === '%PDF-') {
+    // A PDF is kept as it is: <notebook>/<name>.pdf
+    const cd = /filename\*?=(?:UTF-8'')?"?([^";]+)/i.exec(res.headers.get('content-disposition') || '')?.[1];
+    let name = '';
+    try { name = decodeURIComponent(cd || path.basename(new URL(finalUrl).pathname)); } catch { name = cd || ''; }
+    name = baseOf(name || 'Document') || 'Document';
+    const dir = notebookDir(notebook);
+    await fsp.mkdir(dir, { recursive: true });
+    const file = uniquePath(dir, safeName(name), undefined, '.pdf');
+    await fsp.writeFile(file, buf, { flag: 'wx' });
+    return { kind: 'pdf', path: file, url: finalUrl };
+  }
+  if (!/html|xml|text\/plain/i.test(type)) throw new Error(`That link is a ${type.split(';')[0] || 'file'}, not a web page or a PDF.`);
+  const charset = (/charset=([\w-]+)/i.exec(type)?.[1] || /<meta[^>]+charset=["']?([\w-]+)/i.exec(buf.subarray(0, 4000).toString('latin1'))?.[1] || 'utf-8').toLowerCase();
+  let html;
+  try { html = new TextDecoder(charset).decode(buf); } catch { html = buf.toString('utf8'); }
+  return { kind: 'html', html: html.slice(0, 8e6), url: finalUrl };
+});
+// Write a saved article as a note: front matter (tags, source, site, author, published, saved) + the Markdown.
+ipcMain.handle('web:save-article', async (_e, notebook, a) => {
+  const dir = notebookDir(notebook);
+  await fsp.mkdir(dir, { recursive: true });
+  const title = String(a.title || 'Untitled article').replace(/\s+/g, ' ').trim().slice(0, 180);
+  const file = uniquePath(dir, safeName(title));
+  const extra = [
+    ['source', a.url], ['site', a.site], ['author', a.author], ['published', a.published],
+    ['saved', new Date().toISOString().slice(0, 10)],
+  ].filter(([, v]) => v).map(([k, v]) => `${k}: ${yamlStr(String(v).replace(/\s+/g, ' ').trim().slice(0, 300))}`).join('\n');
+  const meta = { title, tags: ['reading'], status: '', pinned: false, created: '', extra };
+  await fsp.writeFile(file, serializeNote(meta, String(a.body || ''), path.basename(file, '.md')), { flag: 'wx' });
+  return file;
+});
+
 // Native context menu; resolves with the clicked item's id (or null).
 ipcMain.handle('menu:popup', (e, items) => new Promise((resolve) => {
   let settled = false;
@@ -2512,6 +2562,7 @@ function buildMenu() {
         item('New Note', 'new-note', 'CmdOrCtrl+N'),
         item('New API Spec (Swagger)', 'new-api', 'CmdOrCtrl+Alt+N'),
         item('New HTML Page', 'new-html'),
+        item('Save Web Page (Article or PDF)…', 'save-web', 'CmdOrCtrl+Shift+L'),
         item('New Notebook', 'new-notebook', 'CmdOrCtrl+Shift+N'),
         item('Open Note in New Window', 'open-window', 'CmdOrCtrl+Alt+O'),
         { type: 'separator' },

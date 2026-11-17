@@ -11,6 +11,7 @@ import { setupResizers } from './resize.js';
 import { createWriter } from './writer.js';
 import { createApiDocs } from './apidocs.js';
 import { createHtmlView } from './html-view.js';
+import { createReading } from './reading.js';
 import { createChatsUI } from './chats-ui.js';
 import { createChangesUI } from './changes-ui.js';
 import { createProjectUI } from './project-ui.js';
@@ -1958,6 +1959,8 @@ const COMMANDS = [
   { id: 'insert-image', title: 'Insert Image…', key: '⇧⌘U', when: needNote, run: insertImages },
   { id: 'copy-link', title: 'Copy Link to Note', key: '⌥⌘L', when: () => !!S.current, run: () => copyLink() },
   { id: 'history', title: 'Version History', key: '⌥⌘Y', when: needNote, run: openHistory },
+  { id: 'save-web', title: 'Save Web Page (Article or PDF)…', key: '⇧⌘L', run: () => reading.saveWebPage() },
+  { id: 'highlights', title: 'Highlights (All Notes)', run: () => reading.openHighlights() },
   { id: 'open-window', title: 'Open Note in New Window', key: '⌥⌘O', when: () => !!S.current && !SINGLE, run: async () => { await save(); api.openWindow(S.current); } },
   { id: 'export-html', title: 'Export as HTML', when: () => !!S.current && !isRaw(), run: () => exportNote('html') },
   { id: 'export-pdf', title: 'Export as PDF', key: '⇧⌘E', when: () => !!S.current && !isRaw(), run: () => exportNote('pdf') },
@@ -2283,6 +2286,7 @@ comments = createComments({
 });
 
 const writer = createWriter({ api, S, $, el, editor, isTrashed, toast, isDark, dirOf, isApi, isHtml });
+const reading = createReading({ api, S, $, el, editor, toast, overlay, closeOverlay, refresh, openNote, setMode, setFilter, live, leafOf, isTrashed, currentNote });
 
 // ```yaml / ```json OpenAPI blocks in a note's preview get an "API docs" button → Swagger in a big window.
 window.addEventListener('vibe:api-docs', (e) => {

@@ -588,6 +588,15 @@ body.html-note #htmlview { display: flex; min-width: 0; min-height: 0; backgroun
 body.html-note #status-pick, body.html-note #tag-list, body.html-note #tag-input, body.html-note #image-btn { display: none; }
 .api-badge.kind-html { background: #c2410c; }
 .bl-chip.kind-html::before { content: '</> '; font-size: 9px; font-weight: 800; color: #c2410c; }
+/* ---------- reading desk (src/reading.js) ---------- */
+.web-save .ws-hint { padding: 10px 16px 14px; font-size: 12.5px; color: var(--muted); }
+.hl-pill { position: fixed; z-index: 60; padding: 5px 12px; border: 0; border-radius: 999px; background: #f5c542; color: #2b2100; font: 600 12.5px/1.2 -apple-system, sans-serif; box-shadow: 0 4px 14px rgba(0,0,0,.25); cursor: pointer; }
+.hl-pill:hover { background: #ffd457; }
+.hl-list ul { max-height: 60vh; }
+.hl-list li.hl-note { padding: 10px 12px 4px; font-size: 11.5px; font-weight: 700; color: var(--muted); text-transform: none; cursor: default; }
+.hl-list li.hl-item { padding: 6px 12px; cursor: pointer; line-height: 1.45; }
+.hl-list li.hl-item:hover { background: var(--hover, rgba(127,127,127,.12)); }
+.hl-list li.hl-item mark { background: rgba(245,197,66,.35); color: inherit; border-radius: 3px; padding: 0 2px; }
 .mention-ico.k-html { color: #c2410c; font-size: 8.5px; font-weight: 800; }
 .apidocs .api-error { position: sticky; top: 0; z-index: 5; margin: 0; padding: 8px 14px; background: #fff7ed; color: #9a3412; border-bottom: 1px solid #fed7aa; font-size: 12.5px; cursor: pointer; }
 .apidocs .swagger-ui .wrapper { padding: 0 18px; max-width: none; }

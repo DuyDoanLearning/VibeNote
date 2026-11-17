@@ -23,8 +23,10 @@
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
     "@electron/packager": "^20.3.0",
+    "@joplin/turndown-plugin-gfm": "1.0.68",
     "@lezer/highlight": "^1.2.5",
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@mozilla/readability": "0.6.0",
     "@replit/codemirror-vim": "^6.4.0",
     "@scalar/api-reference": "^1.78.1",
     "codemirror": "^6.0.2",
@@ -38,7 +40,8 @@
     "marked": "^18.2.0",
     "marked-footnote": "^1.4.0",
     "mermaid": "^12.3.0",
-    "swagger-ui-dist": "^5.34.1"
+    "swagger-ui-dist": "^5.34.1",
+    "turndown": "7.2.4"
   },
   "license": "MIT",
   "repository": {
