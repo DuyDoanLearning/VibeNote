@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: https: http:; font-src 'self' data:; frame-src vibe-drawio: vibe-html:">
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: https: http:; font-src 'self' data:; frame-src vibe-drawio: vibe-html: vibe-pdf:">
   <title>VibeNote</title>
   <link rel="stylesheet" href="dist/katex/katex.min.css">
   <link rel="stylesheet" href="styles.css">
@@ -157,6 +157,7 @@
         <article id="preview" class="markdown"></article>
         <div id="apidocs"></div>
         <div id="htmlview"></div>
+        <div id="fileview"></div>
       </div>
       <div id="empty">
         <div class="empty-mark"><svg class="vn-mark" viewBox="100 100 824 824" aria-hidden="true"><defs><linearGradient id="vnBgB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a3d2b"/><stop offset="1" stop-color="#2e1d13"/></linearGradient><linearGradient id="vnPaperB" x1="0" y1="0" x2="0.25" y2="1"><stop offset="0" stop-color="#fdf7ea"/><stop offset="1" stop-color="#f0e0c2"/></linearGradient></defs><rect x="100" y="100" width="824" height="824" rx="186" fill="url(#vnBgB)"/><rect x="292" y="250" width="440" height="540" rx="64" fill="url(#vnPaperB)"/><path d="M566 230 h86 v330 l-43 -42 l-43 42 z" fill="#c8372f"/></svg></div>

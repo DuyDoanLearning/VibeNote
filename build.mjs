@@ -39,6 +39,38 @@ async function bundleDrawio() {
 }
 try { await bundleDrawio(); } catch (e) { console.warn(`⚠ draw.io editor not bundled (${e.message}). Diagrams will not open in this build.`); }
 
+// ---------- PDF viewer (pdf.js, Apache-2.0, github.com/mozilla/pdf.js) ----------
+// The full viewer (search, thumbnails, highlight / draw / comment tools) from the pinned release, checked against its
+// SHA-256, cached like draw.io and unpacked into dist/pdfjs. Served by main.js through vibe-pdf://.
+const PDFJS = { version: '6.5.438', sha256: 'fcbe9ba21d9911843e3502adc178a7f549a524a4055f887bedc942e5490c6ba1' };
+async function bundlePdfjs() {
+  const out = 'dist/pdfjs';
+  const marker = path.join(out, '.vibenote-version');
+  if (existsSync(marker) && readFileSync(marker, 'utf8') === PDFJS.version) return;
+  const cacheDir = path.join(os.homedir(), 'Library', 'Caches', 'VibeNote');
+  const zip = path.join(cacheDir, `pdfjs-${PDFJS.version}-dist.zip`);
+  const sum = (f) => createHash('sha256').update(readFileSync(f)).digest('hex');
+  if (!existsSync(zip) || sum(zip) !== PDFJS.sha256) {
+    mkdirSync(cacheDir, { recursive: true });
+    console.log(`Downloading the PDF viewer (pdf.js ${PDFJS.version}, about 7 MB, once)…`);
+    const res = await fetch(`https://github.com/mozilla/pdf.js/releases/download/v${PDFJS.version}/pdfjs-${PDFJS.version}-dist.zip`);
+    if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
+    writeFileSync(zip, Buffer.from(await res.arrayBuffer()));
+    if (sum(zip) !== PDFJS.sha256) { rmSync(zip); throw new Error('the downloaded file does not match the expected checksum'); }
+  }
+  rmSync(out, { recursive: true, force: true });
+  mkdirSync(out, { recursive: true });
+  execFileSync('/usr/bin/unzip', ['-q', '-o', zip, '-d', out]);
+  // Not needed: source maps, the debugger, the sample PDF, and the engine for scripts inside PDFs (switched off).
+  for (const p of ['web/debugger.mjs', 'web/debugger.css', 'web/compressed.tracemonkey-pldi-09.pdf', 'build/pdf.sandbox.mjs',
+    'web/wasm/quickjs-eval.js', 'web/wasm/quickjs-eval.wasm']) rmSync(path.join(out, p), { force: true });
+  for (const dir of ['web', 'build']) {
+    for (const f of readdirSync(path.join(out, dir))) if (f.endsWith('.map')) rmSync(path.join(out, dir, f), { force: true });
+  }
+  writeFileSync(marker, PDFJS.version);
+}
+try { await bundlePdfjs(); } catch (e) { console.warn(`⚠ PDF viewer not bundled (${e.message}). PDFs will not open in this build.`); }
+
 
 mkdirSync('dist/katex', { recursive: true });
 cpSync('node_modules/katex/dist/katex.min.css', 'dist/katex/katex.min.css');

@@ -1,5 +1,5 @@
 // Exposes a small, safe API to the renderer. No Node access leaks into the page.
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const invoke = (ch) => (...args) => ipcRenderer.invoke(ch, ...args);
 
@@ -11,6 +11,15 @@ contextBridge.exposeInMainWorld('vibe', {
   snapshot: invoke('note:snapshot'),
   create: invoke('note:create'),
   htmlPreview: invoke('html:preview'),
+  files: {
+    pdfAvailable: invoke('files:pdf-available'),
+    savePdf: invoke('files:save-pdf'),
+    import: invoke('files:import'),
+    read: invoke('files:read'),
+    open: invoke('files:open'),
+    // Where a file dragged in from Finder lives on the Mac.
+    pathOf: (file) => { try { return webUtils.getPathForFile(file); } catch { return ''; } },
+  },
   web: {
     fetch: invoke('web:fetch'),
     saveArticle: invoke('web:save-article'),

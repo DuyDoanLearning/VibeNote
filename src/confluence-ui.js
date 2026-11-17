@@ -467,7 +467,7 @@ export function createConfluenceUI(ctx) {
     const rows = [];
     const walk = async (book, depth) => {
       // A note with sub-notes ("Parent/Parent.md") becomes a parent page instead of a folder, like in Confluence.
-      const own = S.notes.find((n) => !n.trashed && n.notebook === book && n.kind !== 'api' && n.kind !== 'html' && (n.name === leafOf(book) || safeSeg(n.title) === leafOf(book)));
+      const own = S.notes.find((n) => !n.trashed && n.notebook === book && !n.kind && (n.name === leafOf(book) || safeSeg(n.title) === leafOf(book)));
       const oi = own && confluenceInfo(own.meta);
       if (own && oi && oi.kind === 'page') {
         rows.push({ kind: 'folder', book, depth, title: own.meta.title || own.title, own, needed: false,
@@ -480,7 +480,7 @@ export function createConfluenceUI(ctx) {
       for (const n of notes) {
         const info = confluenceInfo(n.meta);
         let kind = 'new', why = '';
-        if (n.kind === 'api' || n.kind === 'html') { kind = 'skip'; why = n.kind === 'api' ? 'API spec — stays in VibeNote' : 'HTML page — stays in VibeNote'; }
+        if (n.kind) { kind = 'skip'; why = `${{ api: 'API spec', html: 'HTML page', pdf: 'PDF', docx: 'Word file', xlsx: 'Excel file' }[n.kind] || 'File'} — stays in VibeNote`; }
         else if (info && info.kind !== 'page') { kind = 'skip'; why = `Confluence ${info.kind} — can only be changed in Confluence`; }
         else if (info) kind = (await hasLocalChanges(n, info.id)) ? 'push' : 'same';
         rows.push({ kind, note: n, depth: depth + 1, title: n.meta.title || n.title || 'Untitled', why });

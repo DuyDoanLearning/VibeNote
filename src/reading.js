@@ -16,7 +16,7 @@ const GAP = String.raw`(?:[\s*_~\`>#|:-]|\\|==|!\[[^\]\n]*\]\([^)\s]*\)|\]\([^)\
 const HL_RE = /==(?=\S)((?:[^=\n]|=(?!=))*?\S)==/g;
 
 // ---------- article → Markdown ----------
-function toMarkdown(html, formulas = []) {
+export function toMarkdown(html, formulas = []) {
   const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-', emDelimiter: '*', hr: '---' });
   td.use(gfm);
   td.remove(['script', 'style', 'noscript', 'iframe', 'form', 'button', 'input', 'select', 'textarea']);
@@ -31,7 +31,19 @@ function toMarkdown(html, formulas = []) {
       return `![${alt}](${src.replace(/\)/g, '%29')})`;
     },
   });
-  return td.turndown(html)
+  // Tables without a header row (Word, many web pages): the first row becomes the header, as people read it.
+  const dom = new DOMParser().parseFromString(`<div id="x">${html}</div>`, 'text/html');
+  for (const t of dom.querySelectorAll('table')) {
+    const first = t.querySelector('tr');
+    if (!first || first.querySelector('th')) continue;
+    for (const td0 of [...first.children]) {
+      const th = dom.createElement('th');
+      th.innerHTML = td0.innerHTML;
+      td0.replaceWith(th);
+    }
+    if (first.parentElement.nodeName !== 'THEAD') { const head = dom.createElement('thead'); t.prepend(head); head.append(first); }
+  }
+  return td.turndown(dom.getElementById('x').innerHTML)
     .replace(/VNTEX(\d+)X/g, (_m, i) => formulas[Number(i)] ?? '')
     .replace(/\u2060/g, '') // word joiners around Wikipedia formulas
     .replace(/^(\s*)([-*+]|\d+\.)\s{2,}/gm, '$1$2 ') // "-   item" → "- item"

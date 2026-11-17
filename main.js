@@ -14,6 +14,8 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, net, prot
 protocol.registerSchemesAsPrivileged([
   { scheme: 'vibe-drawio', privileges: { standard: true, secure: true, supportFetchAPI: true } },
   { scheme: 'vibe-html', privileges: { standard: true, secure: true } },
+  // The bundled PDF viewer (pdf.js) and the PDF it shows (see servePdfViewer).
+  { scheme: 'vibe-pdf', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
 const path = require('path');
 const fs = require('fs');
@@ -48,7 +50,10 @@ const isHtmlFile = (f) => /\.html?$/i.test(f);
 // API specs and HTML pages are kept exactly as typed: no front matter, title = file name, own extension.
 const rawKind = (f) => (isApiFile(f) ? 'api' : isHtmlFile(f) ? 'html' : null);
 const RAW_META = (file) => ({ title: baseOf(file), tags: [], status: '', pinned: false, created: '', extra: '' });
-const isNoteFile = (f) => f.toLowerCase().endsWith('.md') || !!rawKind(f);
+// Files kept as they are (PDF, Word, Excel): listed with the notes, shown by a viewer, never read or written as text.
+const FILE_KINDS = { '.pdf': 'pdf', '.docx': 'docx', '.xlsx': 'xlsx' };
+const fileKind = (f) => FILE_KINDS[path.extname(f).toLowerCase()] || null;
+const isNoteFile = (f) => f.toLowerCase().endsWith('.md') || !!rawKind(f) || !!fileKind(f);
 const baseOf = (f) => path.basename(f, path.extname(f));
 const looksLikeOpenApi = (text) => /^\s*["']?(openapi|swagger)["']?\s*:/m.test(String(text).slice(0, 4000));
 const HTML_TEMPLATE = (title) => `<!doctype html>
@@ -261,6 +266,13 @@ function serializeNote(meta = {}, body = '', fileBase = '') {
 // ---------- vault ----------
 async function readNote(file, notebook, extra = {}) {
   const st = await fsp.stat(file);
+  if (fileKind(file)) {
+    const name = baseOf(file);
+    return {
+      id: `${st.dev}-${st.ino}`, path: file, notebook, name, title: name, body: '', kind: fileKind(file), size: st.size,
+      meta: RAW_META(file), mtime: st.mtimeMs, ctime: st.birthtimeMs, ...extra,
+    };
+  }
   const kind = rawKind(file);
   if (kind && st.size > 5e6) throw new Error('too big');
   const text = await fsp.readFile(file, 'utf8');
@@ -338,7 +350,7 @@ async function moveNoteFile(file, destDir, base = baseOf(file)) {
   await fsp.rename(file, dest);
   await histMoved(file, dest);
   const srcDir = path.dirname(file);
-  if (!samePath(srcDir, destDir)) {
+  if (!samePath(srcDir, destDir) && !fileKind(dest)) {
     const text = await fsp.readFile(dest, 'utf8');
     for (const m of text.matchAll(/\]\(<?(\.assets\/[^)\s>]+)>?\)/g)) {
       let rel;
@@ -418,6 +430,7 @@ async function readLabels(dir) {
   try { return JSON.parse(await fsp.readFile(path.join(dir, 'labels.json'), 'utf8')); } catch { return {}; }
 }
 async function snapshot(file, force, label = 'You') {
+  if (fileKind(file)) return; // PDFs etc. have no text history
   const text = await fsp.readFile(file, 'utf8');
   if (!text.trim()) return;
   const dir = await histDir(file);
@@ -593,6 +606,7 @@ ipcMain.handle('vault:choose', async (e) => {
 
 ipcMain.handle('note:read', async (_e, p) => {
   const file = inRoot(p);
+  if (fileKind(file)) return { kind: fileKind(file), body: '', meta: RAW_META(file) };
   if (rawKind(file)) return { kind: rawKind(file), body: await fsp.readFile(file, 'utf8'), meta: RAW_META(file) };
   const note = parseNote(await fsp.readFile(file, 'utf8'));
   note.meta.title = note.meta.title || path.basename(file, '.md');
@@ -604,6 +618,12 @@ ipcMain.handle('note:save', async (_e, p, meta, body, forceSnapshot) => {
   let file = inRoot(p);
   if (file.startsWith(trashDir() + path.sep)) throw new Error('Notes in the Trash are read-only');
   const title = String(meta.title || '').trim() || 'Untitled';
+  if (fileKind(file)) {
+    // A PDF / Word / Excel file: the title is its file name. Rename it; never write into it.
+    const desired = uniquePath(path.dirname(file), safeName(title), file, path.extname(file).toLowerCase());
+    if (desired !== file) await fsp.rename(file, desired);
+    return desired;
+  }
   const raw = !!rawKind(file);
   // A note with sub-notes is its notebook's own page ("Parent/Parent.md"): renaming it renames the notebook too.
   if (!raw && isOwnPageFile(file) && safeName(title) !== path.basename(path.dirname(file))) {
@@ -691,6 +711,7 @@ ipcMain.handle('note:delete', async (_e, p) => {
 // Silently remove a note that was created but never written in (no Trash clutter).
 ipcMain.handle('note:discard', async (_e, p) => {
   const file = inRoot(p);
+  if (!file.toLowerCase().endsWith('.md')) return; // only an empty new Markdown note is ever thrown away
   const { body } = parseNote(await fsp.readFile(file, 'utf8'));
   if (!body.trim()) await fsp.unlink(file);
 });
@@ -962,10 +983,11 @@ ipcMain.handle('web:save-article', async (_e, notebook, a) => {
   const title = String(a.title || 'Untitled article').replace(/\s+/g, ' ').trim().slice(0, 180);
   const file = uniquePath(dir, safeName(title));
   const extra = [
-    ['source', a.url], ['site', a.site], ['author', a.author], ['published', a.published],
+    ['source', a.url], ['site', a.site], ['author', a.author], ['published', a.published], ['from-file', a.file], ['sheet', a.sheet],
     ['saved', new Date().toISOString().slice(0, 10)],
   ].filter(([, v]) => v).map(([k, v]) => `${k}: ${yamlStr(String(v).replace(/\s+/g, ' ').trim().slice(0, 300))}`).join('\n');
-  const meta = { title, tags: ['reading'], status: '', pinned: false, created: '', extra };
+  const tags = Array.isArray(a.tags) ? a.tags.map(String).filter(Boolean).slice(0, 10) : ['reading'];
+  const meta = { title, tags, status: '', pinned: false, created: '', extra };
   await fsp.writeFile(file, serializeNote(meta, String(a.body || ''), path.basename(file, '.md')), { flag: 'wx' });
   return file;
 });
@@ -1490,6 +1512,138 @@ function serveHtmlPages() {
     }
   });
 }
+
+// ---------- PDFs: the bundled pdf.js viewer (served from dist/pdfjs) and the PDF it shows ----------
+// vibe-pdf://viewer/web/viewer.html?file=/doc/<path> — the viewer loads the PDF from the same origin. Only PDFs in the
+// notes folder are served. Highlights, drawings and notes made in the viewer are saved back into the PDF (files:save-pdf)
+// by the patch below, which also switches off scripts inside PDFs and sends links to the browser.
+const PDFJS_DIR = path.join(__dirname, 'dist', 'pdfjs');
+const PDF_PATCH_JS = `// VibeNote's adjustments to the pdf.js viewer.
+document.addEventListener('webviewerloaded', function () {
+  var o = window.PDFViewerApplicationOptions;
+  o.set('enableScripting', false);   // never run JavaScript inside a PDF
+  o.set('isEvalSupported', false);
+  o.set('externalLinkTarget', 2);    // links open a new window → VibeNote sends them to the browser
+  o.set('defaultUrl', '');
+  var app = window.PDFViewerApplication;
+  var saving = false;
+  function save(reason) {
+    if (saving || !app.pdfDocument || !app._annotationStorageModified) return Promise.resolve(false);
+    saving = true;
+    return app.pdfDocument.saveDocument().then(function (data) {
+      parent.postMessage({ vibePdf: 'save', data: data, reason: reason }, '*', [data.buffer]);
+      return true;
+    }, function (e) {
+      parent.postMessage({ vibePdf: 'error', message: String(e && e.message || e) }, '*');
+      return false;
+    }).finally(function () { saving = false; });
+  }
+  setInterval(function () { save('auto'); }, 1500);
+  window.addEventListener('message', function (e) {
+    if (e.source !== parent || !e.data || e.data.vibePdf !== 'flush') return;
+    save('flush').then(function (saved) { parent.postMessage({ vibePdf: 'flushed', saved: saved, id: e.data.id }, '*'); });
+  });
+  app.initializedPromise.then(function () {
+    app.eventBus.on('documentloaded', function () { parent.postMessage({ vibePdf: 'loaded', pages: app.pagesCount }, '*'); });
+  });
+});
+`;
+// Things that make no sense inside VibeNote: opening another file from the viewer.
+const PDF_PATCH_CSS = '#openFile, #secondaryOpenFile { display: none !important; }\n';
+function servePdfViewer() {
+  protocol.handle('vibe-pdf', async (req) => {
+    const u = new URL(req.url);
+    const rel = decodeURIComponent(u.pathname).replace(/^\/+/, '');
+    if (rel.startsWith('doc/')) {
+      let file;
+      try { file = inRoot('/' + rel.slice(4)); } catch { return new Response('forbidden', { status: 403 }); }
+      if (fileKind(file) !== 'pdf') return new Response('forbidden', { status: 403 });
+      try {
+        return new Response(await fsp.readFile(file), { headers: { 'content-type': 'application/pdf', 'cache-control': 'no-store' } });
+      } catch { return new Response('not found', { status: 404 }); }
+    }
+    const headers = (ext) => ({
+      'content-type': MIME[ext] || (ext === '.ftl' ? 'text/plain; charset=utf-8' : ext === '.bcmap' || ext === '.pfb' || ext === '.icc' ? 'application/octet-stream' : 'application/octet-stream'),
+      // The viewer may load only its own files and the PDF: nothing goes out.
+      ...(ext === '.html' && { 'content-security-policy': "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self'; img-src 'self' blob: data:; media-src blob:; font-src 'self' data: blob:; connect-src 'self' blob: data:; base-uri 'none'; form-action 'none';" }),
+    });
+    if (rel === 'web/vibenote-patch.js') return new Response(PDF_PATCH_JS, { headers: headers('.js') });
+    if (rel === 'web/vibenote-patch.css') return new Response(PDF_PATCH_CSS, { headers: headers('.css') });
+    const file = path.resolve(PDFJS_DIR, rel || 'web/viewer.html');
+    if (!file.startsWith(PDFJS_DIR + path.sep)) return new Response('forbidden', { status: 403 });
+    try {
+      const ext = path.extname(file).toLowerCase();
+      let data = await fsp.readFile(file);
+      if (rel === 'web/viewer.html') {
+        data = Buffer.from(String(data).replace('<script src="../build/pdf.mjs" type="module"></script>',
+          '<script src="vibenote-patch.js"></script><link rel="stylesheet" href="vibenote-patch.css" />\n<script src="../build/pdf.mjs" type="module"></script>'));
+      }
+      return new Response(data, { headers: headers(ext) });
+    } catch {
+      return new Response('not found', { status: 404 });
+    }
+  });
+}
+// The bytes of a Word / Excel file in the notes folder, for the viewer (read-only).
+ipcMain.handle('files:read', async (_e, p) => {
+  const file = inRoot(p);
+  if (!['docx', 'xlsx'].includes(fileKind(file))) throw new Error('Not a Word or Excel file.');
+  if ((await fsp.stat(file)).size > 60e6) throw new Error('The file is bigger than 60 MB.');
+  return fsp.readFile(file);
+});
+// Open a PDF / Word / Excel file in its own app (Preview, Word, Excel, Numbers…).
+ipcMain.handle('files:open', async (_e, p) => {
+  const file = inRoot(p);
+  if (!fileKind(file)) throw new Error('Not a PDF, Word or Excel file.');
+  const err = await shell.openPath(file);
+  if (err) throw new Error(err);
+});
+ipcMain.handle('files:pdf-available', () => fs.existsSync(path.join(PDFJS_DIR, 'web', 'viewer.html')));
+// Save the viewer's copy of the PDF (original + your highlights). The first time a PDF is changed, the original is
+// kept in <userData>/pdf-originals/ so it can always be recovered.
+const pdfBackedUp = new Set();
+ipcMain.handle('files:save-pdf', async (_e, p, bytes) => {
+  const file = inRoot(p);
+  if (fileKind(file) !== 'pdf') throw new Error('Not a PDF.');
+  const buf = Buffer.from(bytes);
+  if (buf.length < 100 || buf.subarray(0, 5).toString('latin1') !== '%PDF-') throw new Error('The viewer sent something that is not a PDF.');
+  if (!pdfBackedUp.has(file)) {
+    const dir = path.join(app.getPath('userData'), 'pdf-originals');
+    await fsp.mkdir(dir, { recursive: true });
+    const st = await fsp.stat(file);
+    const keep = path.join(dir, `${st.dev}-${st.ino}-${path.basename(file)}`);
+    if (!fs.existsSync(keep)) await fsp.copyFile(file, keep);
+    pdfBackedUp.add(file);
+  }
+  const tmp = `${file}.vibenote-saving`;
+  await fsp.writeFile(tmp, buf);
+  await fsp.rename(tmp, file);
+  return true;
+});
+// Add files from the Mac (PDF, Word, Excel; also Markdown / HTML) to a notebook — copied, the originals stay.
+ipcMain.handle('files:import', async (e, notebook, paths) => {
+  let list = paths;
+  if (!Array.isArray(list) || !list.length) {
+    const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
+      title: 'Add files to the notebook', buttonLabel: 'Add',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Documents', extensions: ['pdf', 'docx', 'xlsx', 'md', 'html', 'htm'] }],
+    });
+    if (r.canceled) return [];
+    list = r.filePaths;
+  }
+  const dir = notebookDir(notebook);
+  await fsp.mkdir(dir, { recursive: true });
+  const added = [];
+  for (const src of list) {
+    const from = path.resolve(String(src));
+    if (!isNoteFile(from) || !fs.existsSync(from) || !fs.statSync(from).isFile()) continue;
+    const dest = uniquePath(dir, safeName(baseOf(from)), undefined, path.extname(from).toLowerCase());
+    await fsp.copyFile(from, dest, fs.constants.COPYFILE_EXCL);
+    added.push(dest);
+  }
+  return added;
+});
 
 const EMPTY_DIAGRAM = '<mxfile host="VibeNote"><diagram name="Page-1" id="page-1"><mxGraphModel dx="1000" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>\n';
 const isDiagram = (f) => /\.drawio$/i.test(f);
@@ -2563,6 +2717,7 @@ function buildMenu() {
         item('New API Spec (Swagger)', 'new-api', 'CmdOrCtrl+Alt+N'),
         item('New HTML Page', 'new-html'),
         item('Save Web Page (Article or PDF)…', 'save-web', 'CmdOrCtrl+Shift+L'),
+        item('Add Files (PDF, Word, Excel)…', 'add-files'),
         item('New Notebook', 'new-notebook', 'CmdOrCtrl+Shift+N'),
         item('Open Note in New Window', 'open-window', 'CmdOrCtrl+Alt+O'),
         { type: 'separator' },
@@ -2753,6 +2908,7 @@ app.whenReady().then(async () => {
   buildMenu();
   serveDrawio();
   serveHtmlPages();
+  servePdfViewer();
   createWindow();
   watchRoot();
   app.on('activate', () => {

@@ -11,7 +11,8 @@ import { setupResizers } from './resize.js';
 import { createWriter } from './writer.js';
 import { createApiDocs } from './apidocs.js';
 import { createHtmlView } from './html-view.js';
-import { createReading } from './reading.js';
+import { createReading, toMarkdown } from './reading.js';
+import { createFileView } from './file-view.js';
 import { createChatsUI } from './chats-ui.js';
 import { createChangesUI } from './changes-ui.js';
 import { createProjectUI } from './project-ui.js';
@@ -50,6 +51,7 @@ const ICON = {
   note: '<svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5"/></svg>',
   cmd: '<svg viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 17h7"/></svg>',
   api: '<svg viewBox="0 0 24 24"><path d="M8 6l-5 6 5 6M16 6l5 6-5 6M14 4l-4 16"/></svg>',
+  file: '<svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h6"/></svg>',
   cloud: '<svg viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 00.6-7.95A6 6 0 006.2 9.5 4.3 4.3 0 007 18z"/></svg>',
   upload: '<svg viewBox="0 0 24 24"><path d="M12 16V5M7 10l5-5 5 5M5 19h14"/></svg>',
 };
@@ -97,8 +99,12 @@ const currentNote = () => S.notes.find((n) => n.path === S.current);
 const isTrashed = () => !!currentNote()?.trashed;
 const isApi = () => currentNote()?.kind === 'api';
 const isHtml = () => currentNote()?.kind === 'html';
-// API specs and HTML pages are code, kept exactly as typed (no front matter, tags or Markdown helpers).
-const isRaw = () => isApi() || isHtml();
+// PDF / Word / Excel files: shown by a viewer, never edited as text.
+const FILE_KINDS = new Set(['pdf', 'docx', 'xlsx']);
+const isFileKind = (n) => FILE_KINDS.has(n?.kind);
+const isFileNote = () => isFileKind(currentNote());
+// Anything that isn't a Markdown note: API specs and HTML pages (code, kept as typed) and files.
+const isRaw = () => !!currentNote()?.kind;
 const langOf = (n) => (n?.kind === 'api' ? (/\.json$/i.test(n.path) ? 'json' : 'yaml') : n?.kind === 'html' ? 'html' : 'markdown');
 const isDark = () => matchMedia('(prefers-color-scheme: dark)').matches;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -109,7 +115,7 @@ function startsWithTitle(body, title) {
 }
 
 const API_ROOT = 'APIs'; // top-level notebook for API specs (own sidebar section)
-const kindOf = (n) => (n.kind === 'api' || n.kind === 'html' ? n.kind : confluenceInfo(n.meta) ? 'confluence' : 'note');
+const kindOf = (n) => (n.kind ? n.kind : confluenceInfo(n.meta) ? 'confluence' : 'note');
 // [[Title#frag]] → { note, frag }. A title may itself contain '#', so try the whole thing first.
 function findByTarget(target) {
   const whole = findByTitle(target);
@@ -162,7 +168,7 @@ const editor = createEditor({
     if (!n) return [];
     const ops = (n.kind === 'api' ? [n.body] : embeddedSpecs(n.body)).flatMap(apiOperations)
       .map((o) => ({ label: `${o.method} ${o.path}`, detail: o.summary, type: 'function' }));
-    const hs = n.kind === 'api' || n.kind === 'html' ? [] : mdHeadings(n.body).map((h) => ({ label: h.text, detail: 'H' + h.level, type: 'text' }));
+    const hs = n.kind ? [] : mdHeadings(n.body).map((h) => ({ label: h.text, detail: 'H' + h.level, type: 'text' }));
     return [...ops, ...hs];
   },
   onSelection: () => comments?.selectionChanged(),
@@ -176,6 +182,32 @@ setLinkResolver((target) => {
 });
 const apiDocs = createApiDocs({ api, container: $('#apidocs'), onJump: (line) => editor.gotoLine(line), isDark: () => isDark() });
 const htmlView = createHtmlView({ api, container: $('#htmlview') });
+const fileView = createFileView({
+  api, container: $('#fileview'), el, toast: (m, ms) => toast(m, ms), toMarkdown,
+  onSaved: () => { const s = $('#status-save'); s.textContent = 'Highlights saved'; s.classList.remove('pending'); },
+  // Word / Excel → a Markdown note next to the file
+  makeNote: async (n, body, extra, title = n.title) => {
+    const p = await api.web.saveArticle(n.notebook, { title, body, tags: ['imported'], ...extra });
+    await refresh();
+    await openNote(p);
+    setMode('preview');
+    toast('Made a note from it. The original file stays as it is.');
+  },
+});
+// Drop PDF / Word / Excel files from Finder onto the note list → copied into the notebook.
+{
+  const list = $('#list');
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  list.addEventListener('dragover', (e) => { if (hasFiles(e)) { e.preventDefault(); document.body.classList.add('files-drop'); } });
+  list.addEventListener('dragleave', (e) => { if (!list.contains(e.relatedTarget)) document.body.classList.remove('files-drop'); });
+  list.addEventListener('drop', (e) => {
+    document.body.classList.remove('files-drop');
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    const paths = [...e.dataTransfer.files].map((f) => api.files.pathOf(f)).filter(Boolean);
+    if (paths.length) addFiles(paths);
+  });
+}
 
 // ---------- saving ----------
 let saveTimer = null;
@@ -290,12 +322,30 @@ function validateFilter() {
   if (!ok) S.filter = { type: 'all' };
 }
 
+// Add PDF / Word / Excel (or Markdown / HTML) files from the Mac to a notebook: copies, the originals stay put.
+function filesNotebook() {
+  const f = S.filter;
+  if (f.type === 'notebook' && !inConfluence(f.name)) return f.name;
+  const n = currentNote();
+  return n && !n.trashed && !inConfluence(n.notebook) ? n.notebook : 'Reading';
+}
+async function addFiles(paths) {
+  const nb = filesNotebook();
+  let added;
+  try { added = await api.files.import(nb, paths); } catch (e) { return toast('Couldn’t add the files: ' + String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 5000); }
+  if (!added?.length) { if (paths?.length) toast('Only PDF, Word (.docx), Excel (.xlsx), Markdown and HTML files can be added.'); return; }
+  await refresh();
+  await openNote(added[0]);
+  toast(added.length === 1 ? `Added to “${nb || 'Inbox'}”.` : `Added ${added.length} files to “${nb || 'Inbox'}”.`);
+}
+
 async function leaveCurrent() {
+  await fileView.flush(); // a PDF's unsaved highlights
   await comments?.flush();
   await save();
   const p = S.current;
   if (!p) return;
-  if (S.fresh.has(p) && editor.text().trim() === '' && ['', 'Untitled'].includes((S.meta?.title || '').trim())) {
+  if (S.fresh.has(p) && !currentNote()?.kind && editor.text().trim() === '' && ['', 'Untitled'].includes((S.meta?.title || '').trim())) {
     S.fresh.delete(p);
     S.notes = S.notes.filter((n) => n.path !== p);
     S.current = null;
@@ -386,7 +436,7 @@ function linkables() {
     if (seen.has(n.title)) continue;
     seen.add(n.title);
     const kind = kindOf(n);
-    out.push({ kind, title: n.title, insert: n.title, where: `${{ confluence: 'Confluence', api: 'API spec', html: 'HTML page' }[kind] || 'Note'} · ${leaf(n.notebook)}`, path: n.path });
+    out.push({ kind, title: n.title, insert: n.title, where: `${{ confluence: 'Confluence', api: 'API spec', html: 'HTML page', pdf: 'PDF', docx: 'Word', xlsx: 'Excel' }[kind] || 'Note'} · ${leaf(n.notebook)}`, path: n.path });
   }
   const dseen = new Set();
   for (const d of [...(S.diagrams?.notes || []), ...(S.diagrams?.recent || [])]) {
@@ -688,6 +738,10 @@ function visibleNotes() {
 }
 
 function snippet(n) {
+  if (isFileKind(n)) {
+    const mb = (n.size || 0) / 1e6;
+    return `${{ pdf: 'PDF', docx: 'Word document', xlsx: 'Excel workbook' }[n.kind]}${n.size ? ` · ${mb >= 1 ? mb.toFixed(1) + ' MB' : Math.max(1, Math.round(n.size / 1e3)) + ' KB'}` : ''}`;
+  }
   if (n.kind === 'html') {
     // the words a reader sees on the page (not the <head>, scripts or styles)
     const text = n.body.replace(/<head[\s>][\s\S]*?<\/head>/i, ' ').replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]*>/g, ' ');
@@ -782,7 +836,7 @@ function makeDropTarget(node, notebook) {
     e.stopPropagation();
     if (onNote) return dropInto({ notePath: p || null, notebook: book || null }, { note: onNote });
     const n = p && S.notes.find((x) => x.path === p);
-    if (n && inConfluence(notebook) && !confluenceInfo(n.meta) && n.kind !== 'api' && n.kind !== 'html' && !n.trashed) {
+    if (n && inConfluence(notebook) && !confluenceInfo(n.meta) && !n.kind && !n.trashed) {
       return confluence.publishNote(n, notebook); // becomes a Confluence page there (the window asks before publishing)
     }
     if (inConfluence(notebook) || (n && inConfluence(n.notebook))) return p ? moveNote(p, notebook) : null;
@@ -834,7 +888,7 @@ function renderSidebar() {
       if (it.n) {
         const n = it.n;
         const row = sideRow({
-          icon: n.kind === 'api' ? ICON.api : ICON.note, label: n.title, depth,
+          icon: n.kind === 'api' ? ICON.api : isFileKind(n) ? ICON.file : ICON.note, label: n.title, depth,
           active: n.path === S.current,
           onClick: () => openNote(n.path),
           onMenu: () => { openNote(n.path).then(() => noteMenu(n)); },
@@ -846,7 +900,7 @@ function renderSidebar() {
         row.title = n.title;
         row.draggable = true;
         row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/vibe-note', n.path); e.dataTransfer.effectAllowed = 'move'; });
-        if (!cf && n.kind !== 'api' && n.kind !== 'html') makeDropTarget(row, { note: n });
+        if (!cf && !n.kind) makeDropTarget(row, { note: n });
         target.append(row);
         continue;
       }
@@ -1003,8 +1057,8 @@ function filterLabel() {
 
 // ---------- list sections (Arrange → Group by) ----------
 const GROUP_LABEL = { folder: 'notebook', tag: 'tag', type: 'type', none: 'nothing' };
-const KIND_LABEL = { note: 'Note', confluence: 'Confluence', api: 'API', html: 'HTML' };
-const TYPE_GROUPS = [['note', 'Notes'], ['confluence', 'Confluence pages'], ['api', 'API specs'], ['html', 'HTML pages']];
+const KIND_LABEL = { note: 'Note', confluence: 'Confluence', api: 'API', html: 'HTML', pdf: 'PDF', docx: 'Word', xlsx: 'Excel' };
+const TYPE_GROUPS = [['note', 'Notes'], ['confluence', 'Confluence pages'], ['api', 'API specs'], ['html', 'HTML pages'], ['pdf', 'PDFs'], ['docx', 'Word documents'], ['xlsx', 'Spreadsheets']];
 const segs = (p) => (p ? p.split('/') : []);
 const cmpName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 function cmpPath(a, b) {
@@ -1219,6 +1273,9 @@ function renderToolbar() {
   document.body.classList.toggle('api-note', n?.kind === 'api');
   document.body.classList.toggle('html-note', n?.kind === 'html');
   if (n?.kind !== 'html') htmlView.clear(); // stop the page's scripts when another note opens
+  document.body.classList.toggle('file-note', isFileKind(n));
+  if (isFileKind(n) && !n.trashed) fileView.show(n);
+  else if (fileView.current()) fileView.clear();
   const sel = $('#nb-select');
   sel.textContent = '';
   sel.append(new Option('Inbox', ''));
@@ -1231,7 +1288,7 @@ function renderToolbar() {
   $('#fwd-btn').disabled = !S.forward.length;
   // Push: update the Confluence page — or, for a normal note, publish it as a new page.
   const cfKind = confluenceInfo(S.meta)?.kind;
-  $('#push-btn').hidden = !n || !!n.trashed || n.kind === 'api' || n.kind === 'html' || (cfKind && cfKind !== 'page');
+  $('#push-btn').hidden = !n || !!n.trashed || !!n.kind || (cfKind && cfKind !== 'page');
   $('#push-btn').title = cfKind ? 'Push your changes to Confluence' : 'Publish this note as a new Confluence page';
   $('#pin-btn').classList.toggle('on', !!S.meta?.pinned);
   $('#pin-btn').title = S.meta?.pinned ? 'Unpin note (⌥⌘P)' : 'Pin note (⌥⌘P)';
@@ -1304,6 +1361,7 @@ async function renderPreview(force = false) {
   if ((S.mode === 'edit' && !force) || !S.current) return;
   if (isApi()) { apiDocs.show(S.currentId, editor.text()); return; }
   if (isHtml()) { htmlView.show(S.current, editor.text()); return; }
+  if (isFileNote()) return;
   const seq = ++previewSeq;
   const tmp = document.createElement('div');
   const text = editor.text();
@@ -1434,7 +1492,7 @@ async function noteMenu(n) {
   const items = n.trashed
     ? [{ id: 'restore', label: 'Restore' }, { id: 'delete', label: 'Delete Forever…' }]
     : [
-        ...(inConfluence(n.notebook) || n.kind === 'api' || n.kind === 'html' ? [] : [{ id: 'sub', label: 'Add Sub-note' }, { type: 'separator' }]),
+        ...(inConfluence(n.notebook) || n.kind ? [] : [{ id: 'sub', label: 'Add Sub-note' }, { type: 'separator' }]),
         { id: 'window', label: 'Open in New Window' },
         { id: 'pin', label: n.meta.pinned ? 'Unpin' : 'Pin to Top' },
         { id: 'link', label: 'Copy Link' },
@@ -1456,7 +1514,7 @@ async function noteMenu(n) {
 // A page with sub-pages lives inside its own notebook ("Parent/Parent.md"); that note is the notebook's page.
 const segName = (t) => String(t).replace(/[\/\\:*?"<>|#\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80).replace(/^\.+/, '').trim();
 function isOwnPage(n, nb) {
-  return !!nb && n.notebook === nb && nb !== CONFLUENCE_ROOT && n.kind !== 'api' && n.kind !== 'html' &&
+  return !!nb && n.notebook === nb && nb !== CONFLUENCE_ROOT && !n.kind &&
     (n.name === leafOf(nb) || segName(n.title) === leafOf(nb) || n.title === leafOf(nb));
 }
 const ownPageOf = (nb) => live().find((n) => isOwnPage(n, nb));
@@ -1593,7 +1651,7 @@ async function moreMenu() {
   const id = await api.popup([
     { id: 'open-window', label: 'Open in New Window', enabled: !SINGLE },
     { id: 'copy-link', label: 'Copy Link' },
-    { id: 'history', label: 'Version History…' },
+    ...(isFileNote() ? [{ id: 'open-file-app', label: `Open in ${{ pdf: 'Preview', docx: 'Word', xlsx: 'Excel' }[n.kind]}` }] : [{ id: 'history', label: 'Version History…' }]),
     ...(confluenceInfo(S.meta)?.kind === 'page' ? [
       { type: 'separator' },
       { id: 'confluence-push', label: 'Push to Confluence…' },
@@ -1607,7 +1665,7 @@ async function moreMenu() {
     ...(isHtml() ? [
       { type: 'separator' },
       { id: 'html-reload', label: 'Reload Page' },
-    ] : [
+    ] : isRaw() ? [] : [
       { type: 'separator' },
       { id: 'export-html', label: 'Export as HTML…' },
       { id: 'export-pdf', label: 'Export as PDF…' },
@@ -1958,7 +2016,9 @@ const COMMANDS = [
   { id: 'status-none', title: 'Clear Status', key: '⌥⌘0', when: needNote, run: () => { S.meta.status = ''; metaChanged(); } },
   { id: 'insert-image', title: 'Insert Image…', key: '⇧⌘U', when: needNote, run: insertImages },
   { id: 'copy-link', title: 'Copy Link to Note', key: '⌥⌘L', when: () => !!S.current, run: () => copyLink() },
-  { id: 'history', title: 'Version History', key: '⌥⌘Y', when: needNote, run: openHistory },
+  { id: 'history', title: 'Version History', key: '⌥⌘Y', when: () => needNote() && !isFileNote(), run: openHistory },
+  { id: 'add-files', title: 'Add Files (PDF, Word, Excel)…', run: () => addFiles() },
+  { id: 'open-file-app', title: 'Open in Its Own App (Preview, Word, Excel)', when: () => isFileNote(), run: () => api.files.open(S.current).catch((e) => toast(String(e?.message || e))) },
   { id: 'save-web', title: 'Save Web Page (Article or PDF)…', key: '⇧⌘L', run: () => reading.saveWebPage() },
   { id: 'highlights', title: 'Highlights (All Notes)', run: () => reading.openHighlights() },
   { id: 'open-window', title: 'Open Note in New Window', key: '⌥⌘O', when: () => !!S.current && !SINGLE, run: async () => { await save(); api.openWindow(S.current); } },

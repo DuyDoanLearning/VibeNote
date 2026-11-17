@@ -6,8 +6,9 @@ const el = (tag, cls, text) => {
   if (text != null) e.textContent = text;
   return e;
 };
-const ICON = { project: '◆', note: '📄', confluence: '☁', api: 'API', html: '</>', diagram: '◇' };
-const KIND_ORDER = { project: 0, note: 1, confluence: 2, api: 3, html: 4, diagram: 5 };
+const ICON = { project: '◆', note: '📄', confluence: '☁', api: 'API', html: '</>', pdf: 'PDF', docx: 'DOC', xlsx: 'XLS', diagram: '◇' };
+const KIND_ORDER = { project: 0, note: 1, confluence: 2, api: 3, html: 4, pdf: 5, docx: 6, xlsx: 7, diagram: 8 };
+const KIND_DESC = { confluence: 'Confluence page (as a note)', api: 'API spec (OpenAPI)', html: 'HTML page', pdf: 'PDF file', docx: 'Word file (.docx)', xlsx: 'Excel file (.xlsx)' };
 
 export function createMentions({ input, menuHost, getLinkables }) {
   const menu = el('div', 'slash-menu mention-menu');
@@ -84,7 +85,7 @@ export function createMentions({ input, menuHost, getLinkables }) {
     const line = (x) => {
       if (x.kind === 'project') return `- Project "${x.title}": its notes are in ${x.path}${x.repo ? `; its code is in ${x.repo}` : ''}.`;
       if (x.kind === 'diagram') return `- Diagram "${x.title}" (draw.io XML): ${x.path}`;
-      return `- ${x.kind === 'confluence' ? 'Confluence page (as a note)' : x.kind === 'api' ? 'API spec (OpenAPI)' : x.kind === 'html' ? 'HTML page' : 'Note'} "${x.title}": ${x.path}`;
+      return `- ${KIND_DESC[x.kind] || 'Note'} "${x.title}": ${x.path}`;
     };
     return `<vibenote-mentions>\nThe user mentioned these with @ — read them if the request depends on them:\n${used.map(line).join('\n')}\n</vibenote-mentions>\n\n`;
   }
