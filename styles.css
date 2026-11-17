@@ -1143,3 +1143,14 @@ html[data-builtin-theme="lamplight"] #comment-float { color: #14171C; box-shadow
 .ph-chev svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.4; }
 .ph-chev.open { transform: rotate(90deg); }
 .ph-folder .ph-item-title { font-weight: 600; }
+
+/* Click-to-zoom viewer for Mermaid diagrams (src/zoom-view.js) */
+#preview .mermaid.zoomable { cursor: zoom-in; }
+.zoom-view { position: fixed; inset: 0; z-index: 2000; background: var(--bg); -webkit-app-region: no-drag; }
+.zv-stage { position: absolute; inset: 0; overflow: hidden; cursor: grab; }
+.zv-stage.dragging { cursor: grabbing; }
+.zv-stage > svg { position: absolute; left: 0; top: 0; transform-origin: 0 0; max-width: none; user-select: none; }
+.zv-bar { position: absolute; top: 14px; right: 16px; display: flex; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); box-shadow: 0 4px 16px rgba(0, 0, 0, .15); }
+.zv-bar button { min-width: 30px; height: 28px; padding: 0 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
+.zv-bar button:hover { background: var(--border); }
+.zv-bar .zv-pct { min-width: 56px; font-size: 12px; font-variant-numeric: tabular-nums; }

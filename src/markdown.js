@@ -5,6 +5,7 @@ import hljs from 'highlight.js/lib/common';
 import katex from 'katex';
 import markedFootnote from 'marked-footnote';
 import { bareTasks } from './bare-tasks.js';
+import { zoomView } from './zoom-view.js';
 
 let linkKind = () => 'note'; // target → 'note' | 'confluence' | 'api' | null (missing)
 export function setLinkResolver(fn) { linkKind = fn; }
@@ -214,6 +215,11 @@ export async function postProcess(root, { dir, dark, onTask, copyButtons = false
     const div = document.createElement('div');
     div.className = 'mermaid';
     div.innerHTML = svg;
+    if (div.querySelector('svg')) {
+      div.classList.add('zoomable');
+      div.title = 'Click to zoom';
+      div.addEventListener('click', () => zoomView(div));
+    }
     code.parentElement.replaceWith(div);
   }
 }

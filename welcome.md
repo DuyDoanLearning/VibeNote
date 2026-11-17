@@ -91,6 +91,8 @@ graph LR
   Idea --> Note --> Done
 ```
 
+Click a diagram in the preview to zoom in: pinch or ⌘-scroll to zoom, drag to move around, Esc to close.
+
 ## Learn more
 
 - The **VibeNote Guide** project (in the sidebar, or **Help → VibeNote Guide**) explains every feature, one short note per area, with all the keyboard shortcuts.
