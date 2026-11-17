@@ -5,6 +5,7 @@ import hljs from 'highlight.js/lib/common';
 import katex from 'katex';
 import markedFootnote from 'marked-footnote';
 import { bareTasks } from './bare-tasks.js';
+import { zoomView } from './zoom-view.js';
 
 let linkKind = () => 'note'; // target → 'note' | 'confluence' | 'api' | null (missing)
 export function setLinkResolver(fn) { linkKind = fn; }
@@ -203,6 +204,12 @@ export async function postProcess(root, { dir, dark, onTask, copyButtons = false
       try { img.src = 'file://' + encodeURI(dir + '/' + decodeURI(src)); } catch {}
     });
   }
+  // Pictures (not ones inside a link) open full-window on click, like Mermaid diagrams.
+  root.querySelectorAll('img').forEach((img) => {
+    if (img.closest('a')) return;
+    img.classList.add('zoomable');
+    img.addEventListener('click', () => zoomView(img));
+  });
   root.querySelectorAll('input[type=checkbox]').forEach((box, i) => {
     if (!onTask) return;
     box.disabled = false;
@@ -214,6 +221,11 @@ export async function postProcess(root, { dir, dark, onTask, copyButtons = false
     const div = document.createElement('div');
     div.className = 'mermaid';
     div.innerHTML = svg;
+    if (div.querySelector('svg')) {
+      div.classList.add('zoomable');
+      div.title = 'Click to zoom';
+      div.addEventListener('click', () => zoomView(div));
+    }
     code.parentElement.replaceWith(div);
   }
 }

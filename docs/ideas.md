@@ -43,3 +43,27 @@ Ideas discussed with the owner (2026-11-13), not yet decided or built. Owner's t
 ## Fun
 13. "Explain like I'm 5" toggle on explanation notes.
 14. Weekly recap card.
+
+## Brainstorm 2026-11-17 (owner will think about these later)
+
+### One workplace app
+30. **Today page for the whole app**: Confluence pages that changed, Claude chats waiting for an answer, open plan steps, unticked checkboxes from all notes, code news.
+31. **Quick capture from anywhere**: a global shortcut drops a thought into the Inbox even while VibeNote is hidden.
+32. **One search for everything**: notes, Claude chats, Confluence pages and code from the same ⌘K.
+33. **Jira beside Confluence** (same Atlassian sign-in): a spec shows its tickets; turn a checklist line into a ticket.
+34. **Two notes side by side**, or tabs.
+35. Owner to list the moments in a normal workday when they leave VibeNote for another app; each one is a candidate feature.
+
+### What users say about similar apps (web research; mostly blogs quoting Reddit, rough picture)
+- Obsidian: loved for plain files you keep if you quit; most disliked is paying monthly for sync; hard for non-technical people.
+- Notion: most common complaint is complexity; trust drops after sync bugs or AI deleting content. Common pattern: Notion for teams, lasting knowledge in Obsidian.
+- Obsidian + Claude Code setups: the vault turns into a "junk drawer", AI writing drifts into filler, upkeep kills most setups; the praised value is finding old context again.
+- Closest to VibeNote: Nimbalyst (specs, diagrams, mockups, Claude Code/Codex side panel, every AI change approved as a diff; free for individuals, MIT). Also Novi Notes (Mac, local-first, MCP, one-time purchase).
+- VibeNote's answer to the trust complaints: plain files, Allow/Deny cards, version history. Not seen elsewhere: Confluence two-way sync + Claude + code review in one app.
+
+### Paid product (business model)
+36. Options: free app + paid service (sync/publish, voluntary work license); pay once with 1 year of updates (common for Mac apps, ~$29–99); subscription. Suggestion: free open-source notes app + paid "Work" edition (Confluence/Jira, project workspace, sync), pay once ~$39–49 with a year of updates or a yearly work license a company pays. Likely buyers: developers whose specs live in Confluence and who code with Claude.
+37. Before selling: (a) the Claude panel must use the buyer's own API key (third-party apps can't use people's Claude subscription login without Anthropic's approval); (b) Apple Developer account for signing, notarization and auto-update; (c) the repo is public MIT, so either sell convenience (sync, signed builds) or keep paid features in a private part of the code.
+
+### Sync between Macs (see ⭐ 8)
+38. Today: the app syncs through GitHub + install script; notes (`~/Documents/VibeNotes`) don't sync; settings, chats, Atlassian sign-in and project links stay per Mac on purpose. Options: **A. iCloud Drive** (no building; risk of silent "Note 2" copies, no history) or **B. Sync through git** (⭐ 8, ~1 day; history, mine-vs-theirs on clashes). Suggested: B, not both together. Check that work pages in the notes may live in a personal iCloud/GitHub.

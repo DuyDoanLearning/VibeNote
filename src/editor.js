@@ -13,6 +13,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { yaml } from '@codemirror/lang-yaml';
 import { json } from '@codemirror/lang-json';
+import { html } from '@codemirror/lang-html';
 import { vim } from '@replit/codemirror-vim';
 import { tags as t } from '@lezer/highlight';
 import { typingKeymap, listMarkers, slashComplete, slashClaudeOnly, emojiComplete, fenceComplete } from './typing.js';
@@ -102,10 +103,12 @@ const URL_RE = /^https?:\/\/[^\s<>"]+$/;
 
 export function createEditor({ parent, onChange, onFiles, onDropNote, onLinkClick, onPasteUrl, getTitles, getFragments = () => [], onSelection, onCommentClick, suggest }) {
   const comps = { vim: new Compartment(), gutter: new Compartment(), spell: new Compartment(), ro: new Compartment(), lang: new Compartment() };
-  let lang = 'markdown'; // 'markdown' | 'yaml' | 'json' (API specs)
+  let lang = 'markdown'; // 'markdown' | 'yaml' | 'json' (API specs) | 'html' (HTML pages)
   // Markdown notes get the Markdown helpers; API specs (YAML/JSON) are plain code: no wrapping, no Markdown
   // shortcuts or templates — only /claude.
-  const langExt = () => (lang === 'yaml' || lang === 'json'
+  const langExt = () => (lang === 'html'
+    ? [html(), EditorView.lineWrapping, autocompletion({ override: [slashClaudeOnly], icons: false })]
+    : lang === 'yaml' || lang === 'json'
     ? [lang === 'yaml' ? yaml() : json(), autocompletion({ override: [slashClaudeOnly], icons: false })]
     : [
       // no "setext" headings (text with a line of - or = under it), same as the preview

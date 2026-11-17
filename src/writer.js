@@ -11,7 +11,7 @@ const unwrap = (s) => {
 };
 
 export function createWriter(ctx) {
-  const { api, S, $, el, editor, isTrashed, toast, isDark, dirOf, isApi = () => false } = ctx;
+  const { api, S, $, el, editor, isTrashed, toast, isDark, dirOf, isApi = () => false, isHtml = () => false } = ctx;
   const box = el('div', 'cw');
   box.hidden = true;
   box.innerHTML = `
@@ -155,7 +155,7 @@ export function createWriter(ctx) {
         selection: at.selection,
         request,
         draft: revise,
-        kind: isApi() ? 'api' : 'note',
+        kind: isApi() ? 'api' : isHtml() ? 'html' : 'note',
         useChat,
       });
       if (runId !== id) return; // stopped or replaced
@@ -179,8 +179,8 @@ export function createWriter(ctx) {
     let md = unwrap(draft);
     if (!md || !at) return;
     const doc = editor.text();
-    if (isApi()) {
-      // YAML goes in exactly where the cursor is; keep the following text on its own line.
+    if (isApi() || isHtml()) {
+      // YAML / HTML goes in exactly where the cursor is; keep the following text on its own line.
       const replaced = !!at.selection;
       if (doc[at.to] && doc[at.to] !== '\n' && !md.endsWith('\n')) md += '\n';
       editor.replaceRange(at.from, at.to, md);

@@ -327,9 +327,9 @@ export function createProjectUI(ctx) {
     }
 
     // ----- documents -----
-    const counts = { note: 0, confluence: 0, api: 0 };
+    const counts = { note: 0, confluence: 0, api: 0, html: 0 };
     for (const n of docs) counts[kindOf(n)]++;
-    const summary = [[counts.note, 'note'], [counts.confluence, 'Confluence page'], [counts.api, 'API spec']].filter(([c]) => c).map(([c, w]) => `${c} ${w}${c === 1 ? '' : 's'}`).join(' · ');
+    const summary = [[counts.note, 'note'], [counts.confluence, 'Confluence page'], [counts.api, 'API spec'], [counts.html, 'HTML page']].filter(([c]) => c).map(([c, w]) => `${c} ${w}${c === 1 ? '' : 's'}`).join(' · ');
     const dc = card('ph-docs', 'Documents', small('Add…', () => addDocs(name)));
     dc.append(el('div', 'ph-sub2', summary || 'No documents yet.'));
     dc.append(docTree(name, p, docs, since));

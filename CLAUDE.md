@@ -2,8 +2,8 @@
 
 Markdown note-taking app for macOS (Electron), built by Claude with and for the repo owner, who uses it every day as their main Markdown app. See README.md for features, data layout and the file map.
 
-## Where things stand (updated 2026-11-14)
-- **Stable = `v1.2.1-stable` on `main`** (owner made it official on 2026-11-14; v1.2.1 adds the nested project Documents tree): notes, Claude panel, Confluence, API specs, plus Projects workspace steps 1–3 (projects + home page + multi-repo workspace + several chats per project; draw.io diagrams; coding layout with Changes review, line comments for Claude and a file viewer), VibeNote Guide, Lamplight theme.
+## Where things stand (updated 2026-11-17)
+- **Stable = `v1.3.0-stable` on `main`** (owner made it official on 2026-11-17; v1.3.0 adds sub-notes with a Confluence-style page tree, publish a whole notebook, Confluence picture upload, HTML pages, click-to-zoom pictures/diagrams and the new Espresso icon): notes, Claude panel, Confluence, API specs, plus Projects workspace steps 1–3 (projects + home page + multi-repo workspace + several chats per project; draw.io diagrams; coding layout with Changes review, line comments for Claude and a file viewer), VibeNote Guide, Lamplight theme.
 - **`agent` branch** = where new work starts (it equals `main` at each official release). The owner's Mac runs the build from `agent`; merge into `main` + tag again when the owner wants a new official version.
 - **Next agreed step: 4, spec watch** (a followed Confluence page changes → what changed and which code / API specs it affects), then 5, Figma → API proposal. Owner's newer ideas (context bridge to T3 Code / a terminal `claude`, "Build this" button on a spec, project memory, local folders as context, a codebase-memory MCP server) are in `docs/workspace-spec.md` → "Ideas attached to this spec" and `docs/ideas.md`. Ask which they want before starting something big.
 - The owner keeps a plain-language backlog note in their notes, "Workspace backlog" (they moved it to the Inbox; find it by title, don't assume a notebook). Keep it in step with `docs/` when a step is finished: tick the step and add a short "how to try it".
@@ -25,12 +25,13 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - When a user-facing feature changes, update `welcome.md` (first-run note) and the matching note in `guide/` (the built-in VibeNote Guide project, synced into the notes folder).
 
 ## Branches / releases
-- `main` + tags `v*-stable` (newest: `v1.2.1-stable`; `v1.2.0-stable` brought the Projects workspace, diagrams and the coding layout into stable on 2026-11-14; `v1.1.0-stable` brought the Claude panel, Confluence and API specs; `v1.0.2-stable` is the last notes-only release) = the stable app. Keep it stable; only fixes and docs go here. Tag each stable fix release `vX.Y.Z-stable` (the install script picks the newest).
+- `main` + tags `v*-stable` (newest: `v1.3.0-stable` (2026-11-17: sub-notes, notebook publishing, picture upload, HTML pages, zoom, new icon); `v1.2.1-stable` nested project Documents tree; `v1.2.0-stable` brought the Projects workspace, diagrams and the coding layout into stable on 2026-11-14; `v1.1.0-stable` brought the Claude panel, Confluence and API specs; `v1.0.2-stable` is the last notes-only release) = the stable app. Keep it stable; only fixes and docs go here. Tag each stable fix release `vX.Y.Z-stable` (the install script picks the newest).
 - `agent` = experimental work. Current experiment: the Projects workspace (spec: `docs/workspace-spec.md`).
 - `scripts/install-version.sh <ref>` builds any version in a temporary worktree and installs it into /Applications — the owner's rollback path (no argument = newest `v*-stable` tag) and upgrade path (`agent`).
 
 ## Principles
 - **Notes are plain files.** `.md` files in a folder, notebooks = folders (nestable), metadata = YAML front matter (`title`, `tags`, `status`, `pinned`, `created`; unknown keys are preserved in `meta.extra`). Never introduce a database or hidden per-note state — the notes folder must stay syncable between Macs.
+- **Sub-notes = a folder with its own page.** A note with sub-notes lives inside a notebook of the same name (`Plan/Plan.md` + `Plan/Step.md`), like fetched Confluence parent pages. `isOwnPage` (renderer) / `isOwnPageFile` (main) recognise it; renaming either side renames both. The sidebar's Notebooks section is a page tree (`pageTree`).
 - **Title = file name.** The title field above the editor is the source of truth; saving renames the file. A `title:` line is written to front matter only when the title can't be a file name (`/ : ? …`) or got a ` 2` suffix. Titles no longer come from the note's first line (older notes may still start with a duplicate `# Title`).
 - Pasted/picked images go to `<notebook>/.assets/` (HEIC converted to JPEG with `sips`); moving a note copies its assets along. Trash = `<root>/.trash/` + `index.json`.
 - Local-only state (version history keyed by file inode, settings, agent chats) lives in `app.getPath('userData')`.
@@ -59,6 +60,10 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 - The editor runs with `stealth=1` (no outside services). In that mode draw.io shows cramped dialogs, so `DRAWIO_PATCH` in main.js is appended to `js/PostConfig.js` when served (currently: the full "More Shapes" window). Don't use `offline=1`. Add further fixes of that kind there.
 - Claude editing an open diagram was verified live (Edit on the .drawio file → Allow card → the editor reloads).
 - Embed protocol: `?embed=1&proto=json`; the frame posts `init` / `autosave` / `save`, VibeNote posts `load` / `status`. Test trick: `win.webContents.mainFrame.framesInSubtree` finds the frame; post a fake `autosave` from inside it.
+
+## HTML pages (agent branch)
+- `.html` / `.htm` files are notes of kind `'html'`, handled like API specs (`rawKind()` in main.js: no front matter, title = file name, kept as typed). The preview is the live page (`src/html-view.js`), served by `serveHtmlPages()` through `vibe-html://page/<path>` (notes folder only).
+- **Safety rule:** the frame is `sandbox="allow-scripts allow-popups allow-modals allow-forms"`. Never add `allow-same-origin` — with it the page could reach `window.api` and every note. Links reach the browser through a `postMessage` from the script appended to each page.
 
 ## Code view and coding layout (agent branch)
 - `src/code-ui.js`: a fourth main-area state (`S.code`, `body.code-open`) with two tabs, Changes (parsed `git diff`) and File (read-only CodeMirror). Line comments are kept in memory and sent to the open chat with `agentPanel.ask`. `code:*` IPC in main.js is read-only and guarded by `repoDir()` / `codeFile()`.
