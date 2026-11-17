@@ -1,6 +1,7 @@
 // Confluence sync UI: the "Fetch from Confluence" window (paste a link, tick pages), Push, Pull latest.
 // Conversion lives in confluence.js; network + files in main.js (confluence:* IPC). Spec: docs/confluence-spec.md.
 import { fromConfluence, toConfluence, confluenceInfo, withConfluenceInfo, placePictures } from './confluence.js';
+import { zoomView } from './zoom-view.js';
 
 export const CONFLUENCE_ROOT = 'Confluence'; // top-level notebook that holds fetched pages
 
@@ -718,11 +719,11 @@ export function createConfluenceUI(ctx) {
         const label = box.querySelector('.ck-label');
         for (const f of files) {
           const img = document.createElement('img');
-          img.className = 'ck-picture';
           img.src = 'file://' + encodeURI(`${S.root}/${f}`);
           img.alt = label?.textContent || '';
-          img.title = 'Click to open full size';
-          img.addEventListener('click', () => cf.openPicture(f));
+          img.className = 'ck-picture zoomable';
+          img.title = 'Click to zoom';
+          img.addEventListener('click', () => zoomView(img));
           box.insertBefore(img, label);
         }
         box.querySelector('.ck-note')?.remove();

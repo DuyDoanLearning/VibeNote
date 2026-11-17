@@ -1,21 +1,32 @@
-// Full-window viewer for a diagram (Mermaid SVG): opens fitted to the window, then zoom with the trackpad pinch,
+// Full-window viewer for a diagram (Mermaid SVG) or a picture: opens fitted to the window, then zoom with the trackpad pinch,
 // ⌘-scroll, + / − keys or the buttons, drag (or two-finger scroll) to move around. Esc, × or a click outside closes.
 
 let open = null;
 
 export function zoomView(source) {
   if (open) open.close();
-  const svg = source.querySelector('svg');
-  if (!svg) return;
-  const pic = svg.cloneNode(true);
-  // Mermaid sizes its SVG to the note column (width="100%", max-width); give it its natural size instead.
-  const vb = pic.viewBox?.baseVal;
-  const w0 = vb?.width || svg.getBoundingClientRect().width || 400;
-  const h0 = vb?.height || svg.getBoundingClientRect().height || 300;
-  pic.removeAttribute('style');
-  pic.setAttribute('width', w0);
-  pic.setAttribute('height', h0);
-  pic.style.width = `${w0}px`; // the app's CSS gives bare SVGs an icon size; the attributes alone lose to it
+  let pic, w0, h0;
+  if (source.tagName === 'IMG') {
+    if (!source.naturalWidth) return; // not loaded (missing file)
+    pic = document.createElement('img');
+    pic.src = source.currentSrc || source.src;
+    pic.alt = source.alt;
+    pic.draggable = false;
+    w0 = source.naturalWidth;
+    h0 = source.naturalHeight;
+  } else {
+    const svg = source.querySelector('svg');
+    if (!svg) return;
+    pic = svg.cloneNode(true);
+    // Mermaid sizes its SVG to the note column (width="100%", max-width); give it its natural size instead.
+    const vb = pic.viewBox?.baseVal;
+    w0 = vb?.width || svg.getBoundingClientRect().width || 400;
+    h0 = vb?.height || svg.getBoundingClientRect().height || 300;
+    pic.removeAttribute('style');
+    pic.setAttribute('width', w0);
+    pic.setAttribute('height', h0);
+  }
+  pic.style.width = `${w0}px`; // the app's CSS gives bare SVGs an icon size and limits image widths
   pic.style.height = `${h0}px`;
 
   const ov = document.createElement('div');
@@ -39,7 +50,7 @@ export function zoomView(source) {
   };
   const fit = () => {
     const r = stage.getBoundingClientRect();
-    scale = Math.min((r.width - 48) / w0, (r.height - 48) / h0, 4);
+    scale = Math.min((r.width - 48) / w0, (r.height - 48) / h0, pic.tagName === 'IMG' ? 1 : 4);
     x = (r.width - w0 * scale) / 2;
     y = (r.height - h0 * scale) / 2;
     apply();

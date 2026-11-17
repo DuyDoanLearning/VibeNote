@@ -204,6 +204,12 @@ export async function postProcess(root, { dir, dark, onTask, copyButtons = false
       try { img.src = 'file://' + encodeURI(dir + '/' + decodeURI(src)); } catch {}
     });
   }
+  // Pictures (not ones inside a link) open full-window on click, like Mermaid diagrams.
+  root.querySelectorAll('img').forEach((img) => {
+    if (img.closest('a')) return;
+    img.classList.add('zoomable');
+    img.addEventListener('click', () => zoomView(img));
+  });
   root.querySelectorAll('input[type=checkbox]').forEach((box, i) => {
     if (!onTask) return;
     box.disabled = false;
