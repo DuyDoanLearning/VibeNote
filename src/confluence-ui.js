@@ -19,7 +19,11 @@ export function createConfluenceUI(ctx) {
     return `https://${site}/wiki/pages/viewpage.action?pageId=${id}`;
   };
   const linkedNote = (site, id) => S.notes.find((n) => !n.trashed && confluenceInfo(n.meta)?.id === String(id) && confluenceInfo(n.meta)?.site === site);
-  const errText = (e) => String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+  const errText = (e) => {
+    let t = String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    try { t = JSON.parse(t).message || t; } catch {} // Atlassian sometimes answers with a JSON error
+    return t.replace(/\s*Use documented Confluence HTML format patterns[^\n]*/g, '').replace(/\s*Please fix the HTML and retry\.?/, '').trim();
+  };
 
   // ---------- fetch one page into a note ----------
   async function fetchPage({ site, spaceKey, id, notebook, existing }) {
@@ -448,36 +452,224 @@ export function createConfluenceUI(ctx) {
     });
   }
 
+  // ---------- Publish a whole notebook: notebook → Confluence folder, notes → pages, sub-notebooks → sub-folders ----------
+  // Notes already linked to a page push their edits to that page (wherever it lives); the others become new pages.
+  // Notes stay where they are in VibeNote. Folder ids are remembered (.confluence/folders.json) so publishing again
+  // adds new notes to the same folders.
+  const parentOfNb = (nb) => (nb.includes('/') ? nb.slice(0, nb.lastIndexOf('/')) : '');
+  const byTitle = (a, b) => (a.title || '').localeCompare(b.title || '', undefined, { numeric: true, sensitivity: 'base' });
+  const FATAL = /company proxy|Can’t reach Atlassian|Sign-in|sign in/i;
+
+  async function notebookPlan(nb, folders) {
+    const rows = [];
+    const walk = async (book, depth) => {
+      const folder = { kind: 'folder', book, depth, title: leafOf(book), known: folders[book] || null, needed: false };
+      rows.push(folder);
+      const notes = S.notes.filter((n) => !n.trashed && n.notebook === book).sort(byTitle);
+      for (const n of notes) {
+        const info = confluenceInfo(n.meta);
+        let kind = 'new', why = '';
+        if (n.kind === 'api' || n.kind === 'html') { kind = 'skip'; why = n.kind === 'api' ? 'API spec — stays in VibeNote' : 'HTML page — stays in VibeNote'; }
+        else if (info && info.kind !== 'page') { kind = 'skip'; why = `Confluence ${info.kind} — can only be changed in Confluence`; }
+        else if (info) kind = (await hasLocalChanges(n, info.id)) ? 'push' : 'same';
+        rows.push({ kind, note: n, depth: depth + 1, title: n.meta.title || n.title || 'Untitled', why });
+      }
+      for (const sub of S.notebooks.filter((x) => parentOfNb(x) === book).sort((a, b) => leafOf(a).localeCompare(leafOf(b), undefined, { numeric: true, sensitivity: 'base' }))) await walk(sub, depth + 1);
+    };
+    await walk(nb, 0);
+    // A folder is needed when a new page goes into it or into a folder below it.
+    for (const r of rows) if (r.kind === 'new') for (let b = r.note.notebook; b && (b === nb || b.startsWith(nb + '/')); b = parentOfNb(b)) rows.find((x) => x.kind === 'folder' && x.book === b).needed = true;
+    return rows;
+  }
+
+  const ROW_TEXT = {
+    folder: (r) => (r.known ? 'in Confluence' : r.needed ? 'new folder' : 'no new pages'),
+    new: () => 'new page',
+    push: () => 'your edits go to its page',
+    same: () => 'no changes',
+    skip: (r) => r.why,
+  };
+  const ROW_ICON = { folder: '📁', new: '📄', push: '⬆️', same: '✓', skip: '–' };
+
+  async function publishNotebook(nb) {
+    if (!nb || nb === CONFLUENCE_ROOT || nb.startsWith(CONFLUENCE_ROOT + '/')) return toast('Pages in the Confluence section are pushed with Changes to Push.');
+    await save();
+    const folders = await cf.folders().catch(() => ({}));
+    const rows = await notebookPlan(nb, folders);
+    const top = rows[0];
+    const count = (k) => rows.filter((r) => r.kind === k).length;
+    const nNew = count('new'), nPush = count('push');
+    const nFolders = rows.filter((r) => r.kind === 'folder' && r.needed && !r.known).length;
+    const todo = nNew + nPush;
+    const locs = top.known ? [] : locations();
+    const needPlace = !top.known && nNew > 0;
+
+    const ov = overlay('modal-ov');
+    ov.innerHTML = `
+      <div class="modal cf-push cf-publish cf-pubnb">
+        <h2>Publish notebook to Confluence</h2>
+        <p class="cf-lead">“${esc(leafOf(nb))}” becomes a Confluence folder: its notes become pages, its notebooks sub-folders. The notes stay where they are in VibeNote and get linked to their pages.</p>
+        ${needPlace ? `
+          <label class="cf-label">Put the folder under</label>
+          <select class="cf-loc"></select>
+          <input class="cf-url cf-parent-url" type="url" spellcheck="false" placeholder="…or paste the link of the page or folder it should go under" hidden>
+          <label class="cf-check"><input type="checkbox" class="cf-private"> Only visible to me (you can share it in Confluence later)</label>` : ''}
+        ${top.known ? `<p class="cf-note">Published before: new notes are added to the same Confluence folder.</p>` : ''}
+        <ul class="cf-plan">${rows.map((r, i) => `
+          <li class="cf-plan-row ${r.kind}${r.kind === 'folder' && !r.needed && !r.known ? ' idle' : ''}" data-i="${i}" style="padding-left:${r.depth * 18}px">
+            <span class="cf-plan-ic">${ROW_ICON[r.kind]}</span><span class="cf-plan-t">${esc(r.title)}</span><span class="cf-plan-s">${esc(ROW_TEXT[r.kind](r))}</span>
+          </li>`).join('')}
+        </ul>
+        <ul class="cf-summary">
+          <li>${todo ? `<b>${nNew}</b> new page${nNew === 1 ? '' : 's'}${nFolders ? ` in <b>${nFolders}</b> new folder${nFolders === 1 ? '' : 's'}` : ''}, <b>${nPush}</b> page${nPush === 1 ? '' : 's'} with edits to push.` : 'Nothing to publish — every note is already up to date in Confluence.'}</li>
+        </ul>
+        ${nNew ? `<p class="cf-note">${needPlace ? 'Everyone who can see the parent page will see the new pages (unless you tick “Only visible to me”).' : 'Everyone who can see that folder will see the new pages.'}</p>` : ''}
+        <div class="cf-msg"></div>
+        <div class="actions">
+          <button class="btn" data-act="close">Cancel</button>
+          <button class="btn primary" data-act="publish"${todo ? '' : ' disabled'}>Publish all${todo ? ` (${todo})` : ''}</button>
+        </div>
+      </div>`;
+    const msg = $('.cf-msg', ov);
+    const sel = $('.cf-loc', ov), urlIn = $('.cf-parent-url', ov);
+    if (sel) {
+      const preset = locationForNotebook(nb);
+      sel.append(new Option(locs.length ? 'Choose a page or folder…' : 'No fetched pages yet — paste a link below', ''));
+      for (const l of locs) sel.append(new Option(`${'    '.repeat(Math.max(0, l.depth))}${l.icon} ${l.label}`, l.value));
+      sel.append(new Option('🔗 Paste a page or folder link…', 'url'));
+      sel.value = preset ? preset.value : '';
+      const sync = () => { urlIn.hidden = sel.value !== 'url' && !!locs.length; if (!urlIn.hidden) urlIn.focus(); };
+      if (!locs.length) sel.value = 'url';
+      sync();
+      sel.addEventListener('change', sync);
+    }
+    const closeBtn = $('[data-act=close]', ov);
+    closeBtn.addEventListener('click', closeOverlay);
+    const btn = $('[data-act=publish]', ov);
+    const mark = (i, state, text) => {
+      const li = $(`.cf-plan-row[data-i="${i}"]`, ov);
+      if (!li) return;
+      li.dataset.state = state;
+      $('.cf-plan-s', li).textContent = text;
+      if (state === 'wait') li.scrollIntoView({ block: 'nearest' });
+    };
+
+    btn.addEventListener('click', async () => {
+      // Where the top folder goes (only when it's new and something new needs it).
+      let place = null;
+      if (needPlace) {
+        const loc = locs.find((l) => l.value === sel.value);
+        if (loc?.note) {
+          const i = confluenceInfo(loc.note.meta);
+          place = { site: i.site, parentId: i.id, spaceKey: /\/spaces\/([^/]+)/.exec(i.url)?.[1] || '' };
+        } else if (loc?.nb) {
+          const i = confluenceInfo(loc.sibling.meta);
+          place = { site: i.site, siblingId: i.id, spaceKey: /\/spaces\/([^/]+)/.exec(i.url)?.[1] || '' };
+        } else {
+          const m = /^https:\/\/([^/]+\.atlassian\.net)\/wiki\/.*?(?:\/(?:pages|folder)\/(?:edit-v2\/|edit\/)?(\d+)|[?&]pageId=(\d+))/.exec(urlIn.value.trim());
+          if (!m) { msg.className = 'cf-msg error'; msg.textContent = 'Choose a location, or paste a Confluence page or folder link (…atlassian.net/wiki/…/pages/123… or …/folder/123…).'; return; }
+          place = { site: m[1], parentId: m[2] || m[3], spaceKey: /\/spaces\/([^/]+)/.exec(urlIn.value)?.[1] || '' };
+        }
+        place.private = !!$('.cf-private', ov)?.checked;
+      }
+      btn.disabled = true;
+      closeBtn.disabled = true;
+      if (sel) sel.disabled = urlIn.disabled = true;
+      $('.cf-private', ov)?.setAttribute('disabled', '');
+      msg.className = 'cf-msg wait';
+      msg.textContent = (await cf.status()) ? 'Publishing…' : 'Signing in to Atlassian… a browser tab opened. Sign in there and click Accept, then come back.';
+
+      const made = {}; // notebook → { site, id, spaceId, spaceKey }
+      let ok = 0, failed = 0, stop = '';
+      for (const [i, r] of rows.entries()) {
+        if (r.kind === 'skip' || r.kind === 'same') continue;
+        if (r.kind === 'folder' && !r.needed) continue;
+        if (stop) { mark(i, 'error', 'Not sent'); continue; }
+        try {
+          if (r.kind === 'folder') {
+            if (r.known) { made[r.book] = r.known; continue; }
+            const up = r.book === nb ? place : made[parentOfNb(r.book)];
+            if (!up) { mark(i, 'error', 'Its parent folder wasn’t created'); failed++; continue; }
+            mark(i, 'wait', 'Creating folder…');
+            const c = await cf.createContent({
+              site: up.site, type: 'folder', title: r.title,
+              parentId: up.parentId || (up.siblingId ? '' : up.id), siblingId: up.siblingId, spaceId: up.spaceId,
+              private: r.book === nb && !!up.private,
+            });
+            made[r.book] = { site: up.site, id: c.id, spaceId: c.spaceId, spaceKey: c.spaceKey || up.spaceKey || '' };
+            await cf.rememberFolder(r.book, made[r.book]);
+            mark(i, 'ok', 'Folder created');
+            ok++;
+          } else if (r.kind === 'push') {
+            const state = await pushOne(r.note, (_n, st, text) => mark(i, st, text));
+            state === 'ok' ? ok++ : failed++;
+          } else if (r.kind === 'new') {
+            const f = made[r.note.notebook];
+            if (!f) { mark(i, 'error', 'Its folder wasn’t created'); failed++; continue; }
+            mark(i, 'wait', 'Creating page…');
+            const c = await cf.createContent({ site: f.site, type: 'page', title: r.title, parentId: f.id, spaceId: f.spaceId });
+            // Link the note to its new (still empty) page right away, so if anything below fails, publishing again
+            // pushes to this page instead of making a second one. Then push the text like any edited page.
+            const fresh = S.notes.find((n) => n.path === r.note.path) || r.note;
+            const body = fresh.path === S.current ? editorText() : fresh.body;
+            const m = fresh.meta;
+            await cf.save({
+              notebook: fresh.notebook, existing: fresh.path, body,
+              meta: { title: r.title, tags: m.tags || [], status: m.status || '', pinned: !!m.pinned, created: m.created || '', extra: withConfluenceInfo(m.extra, { url: pageUrl(f.site, f.spaceKey, c.id), version: c.version }) },
+              sidecar: { id: c.id, site: f.site, version: c.version, title: r.title, fetchedAt: new Date().toISOString(), markdown: '', blocks: [], kept: [], people: [] },
+            });
+            await refresh();
+            const state = await pushOne(fresh, (_n, st, text) => mark(i, st, st === 'ok' ? text.replace(/^Pushed/, 'Published') : text));
+            state === 'ok' ? ok++ : failed++;
+          }
+        } catch (e) {
+          const t = errText(e);
+          mark(i, 'error', t);
+          failed++;
+          if (FATAL.test(t)) stop = t;
+        }
+      }
+      await refresh();
+      rerender?.();
+      msg.className = failed ? 'cf-msg error' : 'cf-msg';
+      msg.textContent = stop ? `Stopped: ${stop}` : failed ? `Done — ${ok} sent, ${failed} not sent (see the ⚠️ rows).` : `Done — ${ok} sent to Confluence.`;
+      btn.hidden = true;
+      closeBtn.disabled = false;
+      closeBtn.textContent = 'Close';
+    });
+  }
+
   // ---------- Push several pages (the "Changes to push" window) ----------
   // onStep(note, state, text): state = 'wait' | 'ok' | 'conflict' | 'error'. Never overwrites someone else's newer version.
   async function pushMany(list, onStep) {
     await save();
-    for (const note of list) {
-      onStep(note, 'wait', 'Pushing…');
-      try {
-        const fresh = S.notes.find((n) => n.path === note.path) || note;
-        const info = confluenceInfo(fresh.meta);
-        if (!info || info.kind !== 'page') { onStep(note, 'error', 'Not a Confluence page'); continue; }
-        const side = await cf.sidecar(info.id);
-        if (!side) { onStep(note, 'error', 'Its original copy is missing — fetch it from Confluence again first.'); continue; }
-        const body = fresh.path === S.current ? editorText() : fresh.body;
-        const r = toConfluence(body, side, { resolveLink });
-        const title = fresh.meta.title || side.title;
-        if (r.unchanged && title === side.title) { onStep(note, 'ok', 'Nothing to push'); continue; }
-        const html = await withPictures(r, { site: info.site, pageId: info.id, notePath: fresh.path }, (t) => onStep(note, 'wait', t));
-        const res = await cf.push({ site: info.site, id: info.id, title, html, version: info.version || side.version, draft: false });
-        if (res.conflict) {
-          onStep(note, 'conflict', `Someone changed it in Confluence meanwhile (now version ${res.current}) — not pushed. Open it and use Pull Latest.`);
-          continue;
-        }
-        await fetchPage({ site: info.site, spaceKey: '', id: info.id, notebook: fresh.notebook, existing: fresh.path });
-        onStep(note, 'ok', `Pushed${res.version ? ` (version ${res.version})` : ''}${r.uploads.length ? ` · ${r.uploads.length} picture${r.uploads.length === 1 ? '' : 's'} uploaded` : ''}${r.problems.length ? ` · ⚠️ ${r.problems.join(' ')}` : ''}`);
-        if (r.uploads.length) picturesInBackground([info.id]);
-      } catch (e) {
-        onStep(note, 'error', errText(e));
-      }
-    }
+    for (const note of list) await pushOne(note, onStep);
     await refresh();
+  }
+
+  // Push one linked note's edits to its page (used by "Changes to push" and "Publish notebook"). Returns the state.
+  async function pushOne(note, onStep) {
+    const step = (state, text) => { onStep(note, state, text); return state; };
+    step('wait', 'Pushing…');
+    try {
+      const fresh = S.notes.find((n) => n.path === note.path) || note;
+      const info = confluenceInfo(fresh.meta);
+      if (!info || info.kind !== 'page') return step('error', 'Not a Confluence page');
+      const side = await cf.sidecar(info.id);
+      if (!side) return step('error', 'Its original copy is missing — fetch it from Confluence again first.');
+      const body = fresh.path === S.current ? editorText() : fresh.body;
+      const r = toConfluence(body, side, { resolveLink });
+      const title = fresh.meta.title || side.title;
+      if (r.unchanged && title === side.title) return step('ok', 'Nothing to push');
+      const html = await withPictures(r, { site: info.site, pageId: info.id, notePath: fresh.path }, (t) => step('wait', t));
+      const res = await cf.push({ site: info.site, id: info.id, title, html, version: info.version || side.version, draft: false });
+      if (res.conflict) return step('conflict', `Someone changed it in Confluence meanwhile (now version ${res.current}) — not pushed. Open it and use Pull Latest.`);
+      await fetchPage({ site: info.site, spaceKey: '', id: info.id, notebook: fresh.notebook, existing: fresh.path });
+      if (r.uploads.length) picturesInBackground([info.id]);
+      return step('ok', `Pushed${res.version ? ` (version ${res.version})` : ''}${r.uploads.length ? ` · ${r.uploads.length} picture${r.uploads.length === 1 ? '' : 's'} uploaded` : ''}${r.problems.length ? ` · ⚠️ ${r.problems.join(' ')}` : ''}`);
+    } catch (e) {
+      return step('error', errText(e));
+    }
   }
 
   // ---------- Pull latest ----------
@@ -576,6 +768,7 @@ export function createConfluenceUI(ctx) {
     push,
     pull,
     publishNote,
+    publishNotebook,
     locationForNotebook,
     pushMany,
     decorate,

@@ -799,6 +799,23 @@ body.html-note #status-pick, body.html-note #tag-list, body.html-note #tag-input
 .cf-loc { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 13px; }
 .cf-parent-url { width: 100%; margin-top: 8px; box-sizing: border-box; }
 .cf-publish .cf-summary { margin-top: 14px; }
+/* Publish notebook: the plan (folders, pages) with a live status per row */
+.cf-pubnb { width: min(620px, 92vw); }
+.cf-check { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.cf-plan { list-style: none; margin: 14px 0 0; padding: 6px 0; max-height: 300px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+.cf-plan-row { display: flex; align-items: baseline; gap: 6px; padding: 2px 10px; line-height: 1.6; }
+.cf-plan-ic { flex: none; width: 18px; text-align: center; }
+.cf-plan-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cf-plan-row.folder .cf-plan-t { font-weight: 600; }
+.cf-plan-s { flex: none; max-width: 55%; color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cf-plan-row.new .cf-plan-s, .cf-plan-row.push .cf-plan-s { color: var(--accent); }
+.cf-plan-row.same, .cf-plan-row.skip, .cf-plan-row.idle { opacity: .6; }
+.cf-plan-row[data-state=wait] .cf-plan-s { color: var(--muted); }
+.cf-plan-row[data-state=wait] .cf-plan-s::before { content: '⏳ '; }
+.cf-plan-row[data-state=ok] .cf-plan-s { color: #16a34a; }
+.cf-plan-row[data-state=ok] .cf-plan-s::before { content: '✓ '; }
+.cf-plan-row[data-state=error] .cf-plan-s, .cf-plan-row[data-state=conflict] .cf-plan-s { color: #dc2626; white-space: normal; }
+.cf-plan-row[data-state=error] .cf-plan-s::before, .cf-plan-row[data-state=conflict] .cf-plan-s::before { content: '⚠️ '; }
 
 /* Inline suggestions (grey text after the cursor) */
 .cm-ghost { color: var(--faint); opacity: .75; font-style: italic; pointer-events: none; }

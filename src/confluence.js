@@ -437,9 +437,22 @@ function convertRegion(text, side, replaced, opts = {}) {
     return out;
   }
   // - [ ] tasks → Confluence task lists
+  const isTask = (li) => (li.firstElementChild?.tagName === 'INPUT' ? li.firstElementChild : li.firstElementChild?.tagName === 'P' && li.firstElementChild.firstElementChild?.tagName === 'INPUT' ? li.firstElementChild.firstElementChild : null);
+  // A list that mixes ordinary bullets and to-dos (e.g. "- two" then a blank line then "[ ] task") is split into runs:
+  // Confluence has no list that holds both.
+  for (const ul of [...body.querySelectorAll('ul')]) {
+    const items = [...ul.children].filter((li) => li.tagName === 'LI');
+    if (!items.some(isTask) || items.every(isTask)) continue;
+    let run = null, runTask = null;
+    for (const li of items) {
+      const t = !!isTask(li);
+      if (!run || t !== runTask) { run = doc.createElement('ul'); runTask = t; ul.before(run); }
+      run.append(li);
+    }
+    ul.remove();
+  }
   for (const ul of [...body.querySelectorAll('ul')].reverse()) {
     const items = [...ul.children].filter((li) => li.tagName === 'LI');
-    const isTask = (li) => (li.firstElementChild?.tagName === 'INPUT' ? li.firstElementChild : li.firstElementChild?.tagName === 'P' && li.firstElementChild.firstElementChild?.tagName === 'INPUT' ? li.firstElementChild.firstElementChild : null);
     if (!items.length || !items.every(isTask)) continue;
     ul.setAttribute('data-type', 'task-list');
     for (const li of items) {

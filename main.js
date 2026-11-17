@@ -797,6 +797,7 @@ ipcMain.handle('notebook:rename', async (_e, rel, name) => {
   if (fs.existsSync(to) && !samePath(from, to)) throw new Error(`A notebook named “${safeName(name)}” already exists`);
   await fsp.rename(from, to);
   await histMoved(from, to);
+  await renameFolderLinks(rel, newRel).catch(() => {});
   return newRel;
 });
 
@@ -1898,6 +1899,69 @@ ipcMain.handle('confluence:create', async (_e, { site, parentId, siblingId, titl
   if (!r?.id) throw new Error('Confluence didn’t create the page.');
   return { id: String(r.id), version: r.version?.number || 1, parentId: parent };
 });
+
+// "Publish notebook": a notebook becomes a Confluence folder and its notes pages in it. Folders (and pages inside them)
+// are created through Atlassian's newer server — the older one can't make folders. The page text is then pushed with
+// confluence:push like any page. Parent = parentId (a page or folder), or the parent of a known page (siblingId).
+const atlError = (e) => {
+  let m = String(e?.message || e);
+  try { m = JSON.parse(m).message || m; } catch {}
+  const title = /"title":"([^"]+)"/.exec(m)?.[1];
+  if (/already exists|same title|title.*(?:taken|unique)/i.test(m)) return new Error('A page or folder with this title already exists in that Confluence space. Rename the note (or notebook) and publish again.');
+  return new Error(title ? `Confluence said: ${title}` : m.replace(/\s*Details: \{.*$/s, ''));
+};
+ipcMain.handle('confluence:create-content', async (_e, { site, type, title, parentId, siblingId, spaceId, private: priv }) => {
+  if (!['folder', 'page'].includes(type)) throw new Error('Unknown Confluence content type');
+  if (!/^[\w.-]+\.atlassian\.net$/.test(String(site))) throw new Error('Bad Confluence site');
+  const atl = await loadAtlassian();
+  let parent = parentId ? String(parentId) : '';
+  let space = spaceId ? String(spaceId) : '';
+  if (!parent && siblingId) {
+    const ref = await atl.call('getConfluencePage', { cloudId: site, pageId: String(siblingId), contentFormat: 'markdown' });
+    parent = String(ref.parentId || '');
+    space ||= String(ref.spaceId || '');
+  }
+  if (!/^\d+$/.test(parent)) throw new Error('Couldn’t find where that lives in Confluence. Pick a page as the location instead.');
+  let r;
+  try {
+    r = await atl.call('createConfluenceContent', {
+      cloudId: site, contentType: type, title: String(title || 'Untitled').slice(0, 255),
+      parent: { ...(space && { spaceId: space }), parentContentId: parent },
+      ...(type === 'page' && { body: { format: 'html', value: '<p></p>' } }),
+      ...(priv && { private: true }),
+    }, 'files');
+  } catch (e) { throw atlError(e); }
+  const c = r?.data?.content || r?.content;
+  if (!c?.id) throw new Error(`Confluence didn’t create the ${type}.`);
+  return { id: String(c.id), spaceId: String(c.spaceId || space), spaceKey: /\/spaces\/([^/]+)/.exec(c.webUrl || '')?.[1] || '', version: c.version?.number || 1 };
+});
+
+// Which notebooks were published as which Confluence folders: <root>/.confluence/folders.json (syncs with the notes).
+const foldersFile = () => path.join(rootDir(), '.confluence', 'folders.json');
+const readFolders = async () => { try { return JSON.parse(await fsp.readFile(foldersFile(), 'utf8')); } catch { return {}; } };
+async function writeFolders(all) {
+  await fsp.mkdir(path.dirname(foldersFile()), { recursive: true });
+  await fsp.writeFile(foldersFile(), JSON.stringify(all, null, 1));
+}
+ipcMain.handle('confluence:folders', () => readFolders());
+ipcMain.handle('confluence:remember-folder', async (_e, notebook, info) => {
+  notebookDir(notebook); // validates the name
+  const all = await readFolders();
+  if (info) {
+    if (!/^[\w.-]+\.atlassian\.net$/.test(String(info.site)) || !/^\d+$/.test(String(info.id))) throw new Error('Bad Confluence folder');
+    all[notebook] = { site: info.site, id: String(info.id), spaceId: String(info.spaceId || ''), spaceKey: String(info.spaceKey || '') };
+  } else delete all[notebook];
+  await writeFolders(all);
+});
+// A renamed notebook keeps its Confluence folder (and so do the notebooks inside it).
+async function renameFolderLinks(from, to) {
+  const all = await readFolders();
+  let changed = false;
+  for (const k of Object.keys(all)) {
+    if (k === from || k.startsWith(from + '/')) { all[to + k.slice(from.length)] = all[k]; delete all[k]; changed = true; }
+  }
+  if (changed) await writeFolders(all);
+}
 
 // ---------- comments (highlight → comment → @Claude replies) ----------
 // Threads for a note live in <root>/.comments/<id>.json; the note's front matter holds `comments-id: <id>`.

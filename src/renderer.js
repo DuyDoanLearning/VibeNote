@@ -1456,6 +1456,13 @@ async function refreshConfluence(nb = CONFLUENCE_ROOT) {
   confluence.openFetch(confluenceInfo(page.meta).url);
 }
 
+// The notebook the user is looking at (sidebar filter or project page), if it can be published to Confluence.
+function notebookInView() {
+  const nb = S.home || (S.filter.type === 'notebook' ? S.filter.name : '');
+  if (!nb || [CONFLUENCE_ROOT, API_ROOT].some((r) => nb === r || nb.startsWith(r + '/'))) return '';
+  return nb;
+}
+
 async function notebookMenu(nb) {
   const isCf = nb === CONFLUENCE_ROOT || nb.startsWith(CONFLUENCE_ROOT + '/');
   if (isCf) {
@@ -1475,12 +1482,14 @@ async function notebookMenu(nb) {
   const id = await api.popup([
     { id: 'note', label: 'New Note Here' },
     { id: 'sub', label: 'New Notebook Inside' },
+    ...(nb === API_ROOT || nb.startsWith(API_ROOT + '/') ? [] : [{ type: 'separator' }, { id: 'publish', label: 'Publish to Confluence…' }]),
     { type: 'separator' },
     { id: 'rename', label: 'Rename…' },
     { id: 'delete', label: 'Delete…' },
   ]);
   if (id === 'note') { setFilter({ type: 'notebook', name: nb }); newNote(); }
   if (id === 'sub') newNotebook(nb);
+  if (id === 'publish') confluence.publishNotebook(nb);
   if (id === 'rename') renameNotebook(nb);
   if (id === 'delete') deleteNotebook(nb);
 }
@@ -1872,6 +1881,7 @@ const COMMANDS = [
   { id: 'confluence-push', title: 'Push to Confluence…', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.push() },
   { id: 'confluence-refresh', title: 'Refresh Confluence Pages… (reload a page tree, incl. new pages)', when: () => !SINGLE, run: () => refreshConfluence(CONFLUENCE_ROOT) },
   { id: 'confluence-changes', title: 'Changes to Push to Confluence…', when: () => !SINGLE, run: () => changesUI.open() },
+  { id: 'confluence-publish-notebook', title: 'Publish Notebook to Confluence… (notebook → folder, notes → pages)', when: () => !SINGLE && !!notebookInView(), run: () => confluence.publishNotebook(notebookInView()) },
   { id: 'confluence-publish', title: 'Publish as a New Confluence Page…', when: () => !isTrashed() && !!currentNote() && !confluenceInfo(S.meta) && !isRaw(), run: () => confluence.publishNote() },
   { id: 'confluence-pull', title: 'Pull Latest from Confluence', when: () => !isTrashed() && confluenceInfo(S.meta)?.kind === 'page', run: () => confluence.pull() },
   { id: 'confluence-open', title: 'Open in Confluence', when: () => !!confluenceInfo(S.meta), run: () => confluence.openInConfluence() },

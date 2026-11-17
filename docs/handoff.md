@@ -32,6 +32,12 @@ open directly from the home page. See `docs/workspace-spec.md` → Step 2 and CL
 isolated profile (open, save through the editor's message, outside change reloads, write guards, a real 67 KB
 diagram renders). Real keyboard shortcuts inside the editor could not be tested automatically.
 
+## 2026-11-17: Publish a notebook to Confluence
+
+- Right-click a notebook → **Publish to Confluence…**: notebook → Confluence folder, notes → pages, sub-notebooks → sub-folders. Notes already linked to a page push their edits there; API specs / HTML pages are skipped. Notes stay in their notebook (linked). Details: `docs/confluence-spec.md` → Publish a notebook.
+- Tested live under the owner's private scratch page (test profile + throwaway notes): first publish (2 folders, 3 pages, a picture, private top folder), a simulated failure after page creation (retry pushed to the same page, no duplicate), a second publish (remembered folders, one edited note pushed, one new note added), and a notebook rename (folder link follows).
+- Also fixed for every Push: a list mixing bullets and to-dos is split before sending (Confluence rejected it).
+
 ## 2026-11-16 (evening): HTML pages
 
 - A `.html` file in the notes folder is a note of kind `'html'` (like API specs: no front matter, title = file name, own extension; `rawKind()` / `RAW_META()` in main.js). Editor = CodeMirror HTML; the preview is the real page (`src/html-view.js`).
