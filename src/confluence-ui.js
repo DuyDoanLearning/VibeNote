@@ -352,6 +352,8 @@ export function createConfluenceUI(ctx) {
     if (!note || note.trashed || note.kind === 'api' || note.kind === 'html') return;
     const info = confluenceInfo(note.meta);
     if (info) { if (note.path === S.current) return push(); return toast('This note is already a Confluence page — open it and use Push.'); }
+    // A note with sub-notes is published with them (parent page + sub-pages); its notes stay where they are.
+    if (note.notebook && !note.notebook.startsWith(CONFLUENCE_ROOT) && (note.name === leafOf(note.notebook) || safeSeg(note.title) === leafOf(note.notebook))) return publishNotebook(note.notebook);
     if (note.path === S.current) await save();
     const fresh = S.notes.find((n) => n.path === note.path) || note;
     const body = note.path === S.current ? editorText() : fresh.body;
@@ -464,9 +466,17 @@ export function createConfluenceUI(ctx) {
   async function notebookPlan(nb, folders) {
     const rows = [];
     const walk = async (book, depth) => {
-      const folder = { kind: 'folder', book, depth, title: leafOf(book), known: folders[book] || null, needed: false };
-      rows.push(folder);
-      const notes = S.notes.filter((n) => !n.trashed && n.notebook === book).sort(byTitle);
+      // A note with sub-notes ("Parent/Parent.md") becomes a parent page instead of a folder, like in Confluence.
+      const own = S.notes.find((n) => !n.trashed && n.notebook === book && n.kind !== 'api' && n.kind !== 'html' && (n.name === leafOf(book) || safeSeg(n.title) === leafOf(book)));
+      const oi = own && confluenceInfo(own.meta);
+      if (own && oi && oi.kind === 'page') {
+        rows.push({ kind: 'folder', book, depth, title: own.meta.title || own.title, own, needed: false,
+          known: { site: oi.site, id: oi.id, spaceKey: /\/spaces\/([^/]+)/.exec(oi.url)?.[1] || '' },
+          edits: await hasLocalChanges(own, oi.id) });
+      } else {
+        rows.push({ kind: 'folder', book, depth, title: own ? own.meta.title || own.title : leafOf(book), own: own || null, known: own ? null : folders[book] || null, needed: !!own });
+      }
+      const notes = S.notes.filter((n) => !n.trashed && n.notebook === book && n !== own).sort(byTitle);
       for (const n of notes) {
         const info = confluenceInfo(n.meta);
         let kind = 'new', why = '';
@@ -484,13 +494,28 @@ export function createConfluenceUI(ctx) {
   }
 
   const ROW_TEXT = {
-    folder: (r) => (r.known ? 'in Confluence' : r.needed ? 'new folder' : 'no new pages'),
+    folder: (r) => (r.own ? (r.known ? (r.edits ? 'your edits go to its page' : 'in Confluence') : 'new page with sub-pages') : r.known ? 'in Confluence' : r.needed ? 'new folder' : 'no new pages'),
     new: () => 'new page',
     push: () => 'your edits go to its page',
     same: () => 'no changes',
     skip: (r) => r.why,
   };
   const ROW_ICON = { folder: '📁', new: '📄', push: '⬆️', same: '✓', skip: '–' };
+
+  // Link a note to its new (still empty) page right away, so if anything below fails, publishing again pushes to this
+  // page instead of making a second one. Then push the text like any edited page.
+  async function linkAndPush(note, title, f, c, onStep) {
+    const fresh = S.notes.find((n) => n.path === note.path) || note;
+    const body = fresh.path === S.current ? editorText() : fresh.body;
+    const m = fresh.meta;
+    await cf.save({
+      notebook: fresh.notebook, existing: fresh.path, body,
+      meta: { title, tags: m.tags || [], status: m.status || '', pinned: !!m.pinned, created: m.created || '', extra: withConfluenceInfo(m.extra, { url: pageUrl(f.site, f.spaceKey, c.id), version: c.version }) },
+      sidecar: { id: c.id, site: f.site, version: c.version, title, fetchedAt: new Date().toISOString(), markdown: '', blocks: [], kept: [], people: [] },
+    });
+    await refresh();
+    return pushOne(fresh, (_n, st, text) => onStep(st, st === 'ok' ? text.replace(/^Pushed/, 'Published') : text));
+  }
 
   async function publishNotebook(nb) {
     if (!nb || nb === CONFLUENCE_ROOT || nb.startsWith(CONFLUENCE_ROOT + '/')) return toast('Pages in the Confluence section are pushed with Changes to Push.');
@@ -499,8 +524,9 @@ export function createConfluenceUI(ctx) {
     const rows = await notebookPlan(nb, folders);
     const top = rows[0];
     const count = (k) => rows.filter((r) => r.kind === k).length;
-    const nNew = count('new'), nPush = count('push');
-    const nFolders = rows.filter((r) => r.kind === 'folder' && r.needed && !r.known).length;
+    const parentsNew = rows.filter((r) => r.kind === 'folder' && r.own && !r.known).length;
+    const nNew = count('new') + parentsNew, nPush = count('push') + rows.filter((r) => r.own && r.known && r.edits).length;
+    const nFolders = rows.filter((r) => r.kind === 'folder' && r.needed && !r.known && !r.own).length;
     const todo = nNew + nPush;
     const locs = top.known ? [] : locations();
     const needPlace = !top.known && nNew > 0;
@@ -509,7 +535,7 @@ export function createConfluenceUI(ctx) {
     ov.innerHTML = `
       <div class="modal cf-push cf-publish cf-pubnb">
         <h2>Publish notebook to Confluence</h2>
-        <p class="cf-lead">“${esc(leafOf(nb))}” becomes a Confluence folder: its notes become pages, its notebooks sub-folders. The notes stay where they are in VibeNote and get linked to their pages.</p>
+        <p class="cf-lead">“${esc(leafOf(nb))}” becomes a Confluence ${top.own ? 'page' : 'folder'}: its notes become pages, its notebooks sub-folders and notes with sub-notes pages with sub-pages. The notes stay where they are in VibeNote and get linked to their pages.</p>
         ${needPlace ? `
           <label class="cf-label">Put the folder under</label>
           <select class="cf-loc"></select>
@@ -518,7 +544,7 @@ export function createConfluenceUI(ctx) {
         ${top.known ? `<p class="cf-note">Published before: new notes are added to the same Confluence folder.</p>` : ''}
         <ul class="cf-plan">${rows.map((r, i) => `
           <li class="cf-plan-row ${r.kind}${r.kind === 'folder' && !r.needed && !r.known ? ' idle' : ''}" data-i="${i}" style="padding-left:${r.depth * 18}px">
-            <span class="cf-plan-ic">${ROW_ICON[r.kind]}</span><span class="cf-plan-t">${esc(r.title)}</span><span class="cf-plan-s">${esc(ROW_TEXT[r.kind](r))}</span>
+            <span class="cf-plan-ic">${r.own ? (r.known && !r.edits ? '✓' : r.known ? '⬆️' : '📄') : ROW_ICON[r.kind]}</span><span class="cf-plan-t">${esc(r.title)}</span><span class="cf-plan-s">${esc(ROW_TEXT[r.kind](r))}</span>
           </li>`).join('')}
         </ul>
         <ul class="cf-summary">
@@ -587,7 +613,23 @@ export function createConfluenceUI(ctx) {
         if (r.kind === 'folder' && !r.needed) continue;
         if (stop) { mark(i, 'error', 'Not sent'); continue; }
         try {
-          if (r.kind === 'folder') {
+          if (r.kind === 'folder' && r.own) {
+            // A note with sub-notes: its page holds the sub-pages.
+            if (r.known) {
+              made[r.book] = r.known;
+              if (!r.edits) continue;
+              const state = await pushOne(r.own, (_n, st, text) => mark(i, st, text));
+              state === 'ok' ? ok++ : failed++;
+              continue;
+            }
+            const up = r.book === nb ? place : made[parentOfNb(r.book)];
+            if (!up) { mark(i, 'error', 'Its parent wasn’t created'); failed++; continue; }
+            mark(i, 'wait', 'Creating page…');
+            const c = await cf.createContent({ site: up.site, type: 'page', title: r.title, parentId: up.parentId || (up.siblingId ? '' : up.id), siblingId: up.siblingId, spaceId: up.spaceId, private: r.book === nb && !!up.private });
+            made[r.book] = { site: up.site, id: c.id, spaceId: c.spaceId, spaceKey: c.spaceKey || up.spaceKey || '' };
+            const state = await linkAndPush(r.own, r.title, made[r.book], c, (st, text) => mark(i, st, text));
+            state === 'ok' ? ok++ : failed++;
+          } else if (r.kind === 'folder') {
             if (r.known) { made[r.book] = r.known; continue; }
             const up = r.book === nb ? place : made[parentOfNb(r.book)];
             if (!up) { mark(i, 'error', 'Its parent folder wasn’t created'); failed++; continue; }
@@ -609,18 +651,7 @@ export function createConfluenceUI(ctx) {
             if (!f) { mark(i, 'error', 'Its folder wasn’t created'); failed++; continue; }
             mark(i, 'wait', 'Creating page…');
             const c = await cf.createContent({ site: f.site, type: 'page', title: r.title, parentId: f.id, spaceId: f.spaceId });
-            // Link the note to its new (still empty) page right away, so if anything below fails, publishing again
-            // pushes to this page instead of making a second one. Then push the text like any edited page.
-            const fresh = S.notes.find((n) => n.path === r.note.path) || r.note;
-            const body = fresh.path === S.current ? editorText() : fresh.body;
-            const m = fresh.meta;
-            await cf.save({
-              notebook: fresh.notebook, existing: fresh.path, body,
-              meta: { title: r.title, tags: m.tags || [], status: m.status || '', pinned: !!m.pinned, created: m.created || '', extra: withConfluenceInfo(m.extra, { url: pageUrl(f.site, f.spaceKey, c.id), version: c.version }) },
-              sidecar: { id: c.id, site: f.site, version: c.version, title: r.title, fetchedAt: new Date().toISOString(), markdown: '', blocks: [], kept: [], people: [] },
-            });
-            await refresh();
-            const state = await pushOne(fresh, (_n, st, text) => mark(i, st, st === 'ok' ? text.replace(/^Pushed/, 'Published') : text));
+            const state = await linkAndPush(r.note, r.title, f, c, (st, text) => mark(i, st, text));
             state === 'ok' ? ok++ : failed++;
           }
         } catch (e) {

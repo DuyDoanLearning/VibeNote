@@ -221,6 +221,11 @@ function save(forceSnapshot = false) {
       const n = S.notes.find((x) => x.path === from);
       if (n) Object.assign(n, { path: to, name: nameOf(to), mtime: Date.now(), title: meta.title || 'Untitled' });
       if (S.current === from) S.current = to;
+      const dirOfRel = (p) => p.slice(S.root.length + 1, p.lastIndexOf('/'));
+      if (dirOfRel(to) !== dirOfRel(from) && dirOfRel(from)) { // a note with sub-notes was renamed: so was its notebook
+        notebookMoved(dirOfRel(from), dirOfRel(to));
+        setTimeout(() => refresh(), 0);
+      }
       if (S.fresh.delete(from)) S.fresh.add(to);
       if (!SINGLE) store('last', S.current);
       if (!S.dirty) setStatusSaved(true);
@@ -632,13 +637,9 @@ function renameNotebook(nb) {
     async onSubmit(name) {
       await save();
       const rel = await api.renameNotebook(nb, name);
-      const oldDir = `${S.root}/${nb}/`;
-      if (S.current && S.current.startsWith(oldDir)) S.current = `${S.root}/${rel}/${S.current.slice(oldDir.length)}`;
-      const swap = (x) => (x === nb ? rel : x.startsWith(nb + '/') ? rel + x.slice(nb.length) : x);
-      S.expanded = new Set([...S.expanded].map(swap));
-      store('expanded', [...S.expanded]);
-      if (S.filter.type === 'notebook') setFilter({ type: 'notebook', name: swap(S.filter.name) });
+      notebookMoved(nb, rel); // its own page is renamed too; refresh() finds the open note again by its id
       await refresh();
+      setFilter(S.filter);
     },
   });
 }
@@ -761,9 +762,12 @@ function homeSoon() {
   homeTimer = setTimeout(() => { homeAt = Date.now(); if (S.home && !S.current) projectUI.renderHome(); }, Math.max(300, 4000 - (Date.now() - homeAt)));
 }
 
+// notebook = the notebook a drop goes into; or pass { note } to make that note the parent of what's dropped.
 function makeDropTarget(node, notebook) {
+  const onNote = typeof notebook === 'object' ? notebook.note : null;
   node.addEventListener('dragover', (e) => {
-    if (!e.dataTransfer.types.includes('text/vibe-note')) return;
+    const t = e.dataTransfer.types;
+    if (!t.includes('text/vibe-note') && !(t.includes('text/vibe-notebook') && !inConfluence(onNote ? onNote.notebook : notebook))) return;
     e.preventDefault();
     node.classList.add('drop');
   });
@@ -771,14 +775,17 @@ function makeDropTarget(node, notebook) {
   node.addEventListener('drop', (e) => {
     node.classList.remove('drop');
     const p = e.dataTransfer.getData('text/vibe-note');
-    if (!p) return;
+    const book = e.dataTransfer.getData('text/vibe-notebook');
+    if (!p && !book) return;
     e.preventDefault();
-    const n = S.notes.find((x) => x.path === p);
-    if (n?.trashed) return toast('Restore the note first');
-    if ((notebook === CONFLUENCE_ROOT || notebook.startsWith(CONFLUENCE_ROOT + '/')) && n && !confluenceInfo(n.meta) && n.kind !== 'api' && n.kind !== 'html') {
+    e.stopPropagation();
+    if (onNote) return dropInto({ notePath: p || null, notebook: book || null }, { note: onNote });
+    const n = p && S.notes.find((x) => x.path === p);
+    if (n && inConfluence(notebook) && !confluenceInfo(n.meta) && n.kind !== 'api' && n.kind !== 'html' && !n.trashed) {
       return confluence.publishNote(n, notebook); // becomes a Confluence page there (the window asks before publishing)
     }
-    moveNote(p, notebook);
+    if (inConfluence(notebook) || (n && inConfluence(n.notebook))) return p ? moveNote(p, notebook) : null;
+    dropInto({ notePath: p || null, notebook: book || null }, { nb: notebook });
   });
 }
 
@@ -813,21 +820,90 @@ function renderSidebar() {
   makeDropTarget(inbox, '');
   lib.append(inbox);
 
+  // Notebooks and Confluence pages show as one page tree, like Confluence's sidebar: notebooks and notes together in
+  // title order; a note with sub-notes is a notebook with its own page (click opens the page, ▸ shows the sub-notes).
+  const pageTree = (parent, depth, target, cf) => {
+    const books = S.notebooks.filter((x) => parentOf(x) === parent && (parent || (x !== CONFLUENCE_ROOT && x !== API_ROOT)));
+    const pages = parent ? notes.filter((n) => n.notebook === parent && !isOwnPage(n, parent)) : [];
+    const items = [
+      ...books.map((nb) => ({ nb, label: leafOf(nb) })),
+      ...pages.map((n) => ({ n, label: n.title })),
+    ].sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }));
+    for (const it of items) {
+      if (it.n) {
+        const n = it.n;
+        const row = sideRow({
+          icon: n.kind === 'api' ? ICON.api : ICON.note, label: n.title, depth,
+          active: n.path === S.current,
+          onClick: () => openNote(n.path),
+          onMenu: () => { openNote(n.path).then(() => noteMenu(n)); },
+        });
+        row.classList.add('page-row');
+        if (cf) row.classList.add('cf-page-row');
+        row.prepend(el('span', 'chev')); // same indent as notebooks (they have a ▸ there)
+        if (S.cfChanged?.has(n.path)) row.classList.add('edited');
+        row.title = n.title;
+        row.draggable = true;
+        row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/vibe-note', n.path); e.dataTransfer.effectAllowed = 'move'; });
+        if (!cf && n.kind !== 'api' && n.kind !== 'html') makeDropTarget(row, { note: n });
+        target.append(row);
+        continue;
+      }
+      const nb = it.nb;
+      const own = notes.find((n) => isOwnPage(n, nb));
+      const project = !cf && projectUI?.find(nb);
+      const hasKids = S.notebooks.some((x) => parentOf(x) === nb) || notes.some((n) => n.notebook === nb && !isOwnPage(n, nb));
+      const open = S.expanded.has(nb);
+      const row = sideRow({
+        icon: own ? ICON.note : ICON.book, label: own && !cf ? own.title : leafOf(nb), count: notes.filter((n) => inBook(n, nb)).length, depth,
+        active: (f.type === 'notebook' && f.name === nb && !(own && S.current && S.current !== own.path)) || (own && own.path === S.current),
+        // A project's folder opens the project home page (its notes still show in the list).
+        onClick: () => {
+          if (project) return projectUI.openHome(nb);
+          setFilter({ type: 'notebook', name: nb });
+          if (own) openNote(own.path);
+        },
+        onMenu: () => notebookMenu(nb),
+      });
+      row.dataset.nb = nb;
+      if (own) row.classList.add('page-row');
+      row.title = project ? `${leafOf(nb)} — click to open the project home page`
+        : cf ? (own ? `${leafOf(nb)} — a page with sub-pages` : `${leafOf(nb)} — a Confluence folder`)
+        : own ? `${own.title} — a note with sub-notes` : leafOf(nb);
+      const chev = el('span', 'chev' + (open ? ' open' : ''));
+      if (hasKids) {
+        chev.innerHTML = ICON.chevron;
+        chev.addEventListener('click', (e) => { e.stopPropagation(); setExpanded(nb, !open); renderSidebar(); });
+      }
+      row.prepend(chev);
+      if (!cf && !project) {
+        row.draggable = true;
+        row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/vibe-notebook', nb); e.dataTransfer.effectAllowed = 'move'; });
+      }
+      makeDropTarget(row, nb);
+      target.append(row);
+      if (hasKids && open) pageTree(nb, depth + 1, target, cf);
+    }
+  };
   const wrap = $('#notebooks');
   wrap.textContent = '';
-  const tree = (parent, depth, target = wrap) => {
+  pageTree('', 0, wrap, false);
+  if (!S.notebooks.some((x) => x !== CONFLUENCE_ROOT && x !== API_ROOT)) wrap.append(el('div', 'hint', 'Notebooks are folders. Click + to add one.'));
+  // Drop on the empty space under the tree = move to the top level.
+  if (!wrap.dataset.dropTop) { wrap.dataset.dropTop = '1'; wrap.addEventListener('dragover', (e) => { if (e.target === wrap && e.dataTransfer.types.includes('text/vibe-notebook')) e.preventDefault(); }); wrap.addEventListener('drop', (e) => { const b = e.dataTransfer.getData('text/vibe-notebook'); if (e.target === wrap && b) { e.preventDefault(); dropInto({ notebook: b }, { nb: '' }); } }); }
+
+  // The old notebook-only tree, still used for the APIs section.
+  const tree = (parent, depth, target) => {
     for (const nb of S.notebooks.filter((x) => parentOf(x) === parent && x !== CONFLUENCE_ROOT && x !== API_ROOT)) {
       const kids = S.notebooks.some((x) => parentOf(x) === nb);
       const open = S.expanded.has(nb);
       const row = sideRow({
         icon: ICON.book, label: leafOf(nb), count: notes.filter((n) => inBook(n, nb)).length, depth,
         active: f.type === 'notebook' && f.name === nb,
-        // A project's folder opens the project home page (its notes still show in the list).
-        onClick: () => (projectUI?.find(nb) ? projectUI.openHome(nb) : setFilter({ type: 'notebook', name: nb })),
+        onClick: () => setFilter({ type: 'notebook', name: nb }),
         onMenu: () => notebookMenu(nb),
       });
       row.dataset.nb = nb;
-      if (projectUI?.find(nb)) row.title = `${leafOf(nb)} — click to open the project home page`;
       const chev = el('span', 'chev' + (open ? ' open' : ''));
       if (kids) {
         chev.innerHTML = ICON.chevron;
@@ -837,57 +913,6 @@ function renderSidebar() {
       makeDropTarget(row, nb);
       target.append(row);
       if (kids && open) tree(nb, depth + 1, target);
-    }
-  };
-  tree('', 0);
-  if (!S.notebooks.some((x) => x !== CONFLUENCE_ROOT && x !== API_ROOT)) wrap.append(el('div', 'hint', 'Notebooks are folders. Click + to add one.'));
-
-  // The Confluence section mirrors Confluence's page tree: every page is listed (not only pages with sub-pages),
-  // folders and pages together in title order. A page with sub-pages is a folder whose own page opens on click.
-  const cfTree = (parent, depth, target) => {
-    const books = S.notebooks.filter((x) => parentOf(x) === parent);
-    const pages = notes.filter((n) => n.notebook === parent && !isOwnPage(n, parent));
-    const items = [
-      ...books.map((nb) => ({ nb, label: leafOf(nb) })),
-      ...pages.map((n) => ({ n, label: n.title })),
-    ].sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }));
-    for (const it of items) {
-      if (it.n) {
-        const n = it.n;
-        const row = sideRow({
-          icon: ICON.note, label: n.title, depth,
-          active: n.path === S.current,
-          onClick: () => openNote(n.path),
-          onMenu: () => { openNote(n.path).then(() => noteMenu(n)); },
-        });
-        row.classList.add('cf-page-row');
-        row.prepend(el('span', 'chev')); // same indent as folders (they have a ▸ there)
-        if (S.cfChanged?.has(n.path)) row.classList.add('edited');
-        row.title = n.title;
-        target.append(row);
-        continue;
-      }
-      const nb = it.nb;
-      const own = notes.find((n) => n.notebook === nb && isOwnPage(n, nb));
-      const hasKids = S.notebooks.some((x) => parentOf(x) === nb) || notes.some((n) => n.notebook === nb && !isOwnPage(n, nb));
-      const open = S.expanded.has(nb);
-      const row = sideRow({
-        icon: own ? ICON.note : ICON.book, label: leafOf(nb), count: notes.filter((n) => inBook(n, nb)).length, depth,
-        active: (f.type === 'notebook' && f.name === nb) || (own && own.path === S.current),
-        onClick: () => { setFilter({ type: 'notebook', name: nb }); if (own) openNote(own.path); },
-        onMenu: () => notebookMenu(nb),
-      });
-      row.dataset.nb = nb;
-      row.title = own ? `${leafOf(nb)} — a page with sub-pages` : `${leafOf(nb)} — a Confluence folder`;
-      const chev = el('span', 'chev' + (open ? ' open' : ''));
-      if (hasKids) {
-        chev.innerHTML = ICON.chevron;
-        chev.addEventListener('click', (e) => { e.stopPropagation(); setExpanded(nb, !open); renderSidebar(); });
-      }
-      row.prepend(chev);
-      makeDropTarget(row, nb);
-      target.append(row);
-      if (hasKids && open) cfTree(nb, depth + 1, target);
     }
   };
 
@@ -931,7 +956,7 @@ function renderSidebar() {
       }));
       cfBox.lastElementChild.classList.add('cf-changes-row');
     }
-    cfTree(CONFLUENCE_ROOT, 0, cfBox);
+    pageTree(CONFLUENCE_ROOT, 0, cfBox, true);
   } else {
     cfBox.append(el('div', 'hint', 'Click + to fetch pages from Confluence.'));
   }
@@ -1408,6 +1433,7 @@ async function noteMenu(n) {
   const items = n.trashed
     ? [{ id: 'restore', label: 'Restore' }, { id: 'delete', label: 'Delete Forever…' }]
     : [
+        ...(inConfluence(n.notebook) || n.kind === 'api' || n.kind === 'html' ? [] : [{ id: 'sub', label: 'Add Sub-note' }, { type: 'separator' }]),
         { id: 'window', label: 'Open in New Window' },
         { id: 'pin', label: n.meta.pinned ? 'Unpin' : 'Pin to Top' },
         { id: 'link', label: 'Copy Link' },
@@ -1418,6 +1444,7 @@ async function noteMenu(n) {
   const id = await api.popup(items);
   if (id === 'restore') restoreNote(n.path);
   if (id === 'delete') deleteForever(n.path);
+  if (id === 'sub') addSubNote(n);
   if (id === 'window') { await save(); api.openWindow(n.path); }
   if (id === 'pin') updateMeta(n.path, (m) => { m.pinned = !m.pinned; });
   if (id === 'link') copyLink(n);
@@ -1428,7 +1455,71 @@ async function noteMenu(n) {
 // A page with sub-pages lives inside its own notebook ("Parent/Parent.md"); that note is the notebook's page.
 const segName = (t) => String(t).replace(/[\/\\:*?"<>|#\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80).replace(/^\.+/, '').trim();
 function isOwnPage(n, nb) {
-  return n.notebook === nb && nb !== CONFLUENCE_ROOT && (segName(n.title) === leafOf(nb) || n.title === leafOf(nb));
+  return !!nb && n.notebook === nb && nb !== CONFLUENCE_ROOT && n.kind !== 'api' && n.kind !== 'html' &&
+    (n.name === leafOf(nb) || segName(n.title) === leafOf(nb) || n.title === leafOf(nb));
+}
+const ownPageOf = (nb) => live().find((n) => isOwnPage(n, nb));
+const inConfluence = (nb) => nb === CONFLUENCE_ROOT || nb.startsWith(CONFLUENCE_ROOT + '/');
+
+// ---------- nested notes (a note with sub-notes = a notebook with its own page, like Confluence) ----------
+// A notebook was renamed or moved: keep the open note, the expanded rows and the filter pointing at it.
+function notebookMoved(from, to) {
+  if (from === to) return;
+  const oldDir = `${S.root}/${from}/`;
+  if (S.current && S.current.startsWith(oldDir)) S.current = `${S.root}/${to}/${S.current.slice(oldDir.length)}`;
+  const swap = (x) => (x === from ? to : x.startsWith(from + '/') ? to + x.slice(from.length) : x);
+  S.expanded = new Set([...S.expanded].map(swap));
+  expandTo(to);
+  store('expanded', [...S.expanded]);
+  if (S.filter.type === 'notebook') { S.filter = { type: 'notebook', name: swap(S.filter.name) }; store('filter', S.filter); }
+  if (S.home) S.home = swap(S.home);
+}
+
+// Turn a note into a parent: it moves into a new notebook of the same name and becomes that notebook's page.
+async function makeParent(n) {
+  if (isOwnPage(n, n.notebook)) return n.notebook;
+  const rel = n.notebook ? `${n.notebook}/${n.name}` : n.name;
+  if (S.notebooks.includes(rel) && ownPageOf(rel)) throw new Error(`There’s already a “${n.name}” with sub-notes here`);
+  await save();
+  const made = await api.createNotebook(n.notebook, n.name);
+  const to = await api.move(n.path, made);
+  if (S.current === n.path) S.current = to;
+  if (S.fresh.delete(n.path)) S.fresh.add(to);
+  await refresh();
+  return made;
+}
+
+async function addSubNote(n) {
+  try {
+    const nb = await makeParent(n);
+    setExpanded(nb, true);
+    expandTo(nb);
+    setFilter({ type: 'notebook', name: nb });
+    await newNote();
+  } catch (e) { toast(e.message); }
+}
+
+// Something dropped on a sidebar row. target = { nb } (a notebook, '' = Inbox) or { note } (a note: becomes a parent).
+// Dragging a note that has sub-notes (or a notebook) moves it with everything inside, like Confluence.
+async function dropInto({ notePath, notebook }, target) {
+  try {
+    const n = notePath && S.notes.find((x) => x.path === notePath);
+    if (n?.trashed) return toast('Restore the note first');
+    const src = notebook ?? (n && isOwnPage(n, n.notebook) && !inConfluence(n.notebook) ? n.notebook : null);
+    if (target.note && (target.note.path === notePath || (src && inBook(target.note, src)))) return;
+    if (src != null && target.nb != null && (target.nb === src || target.nb.startsWith(src + '/') || parentOf(src) === target.nb)) return;
+    const dest = target.note ? await makeParent(target.note) : target.nb;
+    if (src != null) {
+      await save();
+      const rel = await api.moveNotebook(src, dest);
+      notebookMoved(src, rel);
+      await refresh();
+      toast(`Moved under ${dest ? leafOf(dest) : 'the top level'}`);
+    } else {
+      await moveNote(notePath, dest);
+    }
+    if (dest) { setExpanded(dest, true); expandTo(dest); renderSidebar(); }
+  } catch (e) { toast(e.message); }
 }
 // The Confluence page to reload a notebook's tree from: its own page, or the nearest page above it.
 function refreshRootFor(nb) {
@@ -1479,8 +1570,9 @@ async function notebookMenu(nb) {
     if (id === 'delete') deleteNotebook(nb);
     return;
   }
+  const own = ownPageOf(nb);
   const id = await api.popup([
-    { id: 'note', label: 'New Note Here' },
+    { id: 'note', label: own ? 'Add Sub-note' : 'New Note Here' },
     { id: 'sub', label: 'New Notebook Inside' },
     ...(nb === API_ROOT || nb.startsWith(API_ROOT + '/') ? [] : [{ type: 'separator' }, { id: 'publish', label: 'Publish to Confluence…' }]),
     { type: 'separator' },

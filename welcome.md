@@ -10,6 +10,7 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - **⌘N** new note · **⇧⌘N** new notebook · **⇧⌘F** search
 - **⌘1 / ⌘2 / ⌘3** editor · split · preview · **⇧⌘↵** focus mode
 - Right-click notes, notebooks and the Trash for more options
+- **Sub-notes:** right-click a note → **Add Sub-note**, or drag a note onto another note in the sidebar. The sidebar shows the whole page tree, like Confluence.
 - Drag the borders between the sidebar, note list, editor, preview and side panels to resize them (double-click a border to reset)
 
 ## Organise
@@ -30,7 +31,7 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 - If someone changed the page in Confluence meanwhile, Push stops. Use **Pull Latest from Confluence** (⌘K) to refresh.
 - **Changes to push:** pages you edited but haven't pushed get an orange **edited** label, and **Changes to push** appears in the sidebar's Confluence section. It lists them all with **Show changes**, **Push** (one page) and **Push all** — a page someone else changed meanwhile is skipped, never overwritten.
 - **Publish a note as a new page:** on any normal note, click **Push** and choose where it goes (one of your fetched pages or folders, or paste a page link) — or drag the note onto a page or folder in the **Confluence** section of the sidebar. After **Publish** the note moves into your Confluence notebooks and stays linked; Push then updates it.
-- **Publish a whole notebook:** right-click a notebook → **Publish to Confluence…**. The notebook becomes a Confluence folder, its notes pages and its notebooks sub-folders; notes already linked to a page just push their edits. You see the plan first, then a ✓ per page. Your notes stay where they are, linked. Publish again later to add new notes.
+- **Publish a whole notebook:** right-click a notebook → **Publish to Confluence…**. The notebook becomes a Confluence folder, its notes pages, its notebooks sub-folders and notes with sub-notes pages with sub-pages; notes already linked to a page just push their edits. You see the plan first, then a ✓ per page. Your notes stay where they are, linked. Publish again later to add new notes.
 - **Pictures** (images and draw.io diagrams): click **Show pictures from Confluence** in a 🔒 box, or ⌘K → *Get Pictures from Confluence*. The first time, Atlassian asks you to sign in once more (click Accept). After that, pictures update by themselves when you fetch or pull. Click a picture to zoom in.
 
 ## Ask Claude to write

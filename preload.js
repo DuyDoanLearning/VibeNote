@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('vibe', {
   exportNote: invoke('note:export'),
   createNotebook: invoke('notebook:create'),
   renameNotebook: invoke('notebook:rename'),
+  moveNotebook: invoke('notebook:move'),
   deleteNotebook: invoke('notebook:delete'),
   openWindow: invoke('window:open-note'),
   getSettings: invoke('settings:get'),

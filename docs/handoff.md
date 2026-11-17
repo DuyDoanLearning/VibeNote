@@ -32,6 +32,12 @@ open directly from the home page. See `docs/workspace-spec.md` → Step 2 and CL
 isolated profile (open, save through the editor's message, outside change reloads, write guards, a real 67 KB
 diagram renders). Real keyboard shortcuts inside the editor could not be tested automatically.
 
+## 2026-11-17 (afternoon): sub-notes, zoom, new icon
+
+- **Sub-notes (page tree like Confluence):** a note with sub-notes = a notebook with its own page (`Plan/Plan.md`), the convention fetched Confluence pages already used. The Notebooks section is now a page tree (`pageTree` in renderer.js, shared with the Confluence section): notes show under expanded notebooks. Right-click a note → **Add Sub-note** (`makeParent` / `addSubNote`). Drag and drop in the sidebar (`dropInto`): note on note = sub-note, note/notebook on notebook = move, a parent note or notebook moves with everything inside (`notebook:move` IPC), empty space under the tree = top level. Renaming a parent note renames its folder (`note:save`, `isOwnPageFile`); renaming a notebook renames its own page (`notebook:rename`). Projects can't be moved. Publish notebook makes a parent page with sub-pages for such notes. Tested in an isolated profile (add, rename both ways, drag note/list item/parent, refuse dropping into itself, assets follow) and with a stand-in for Atlassian for publishing (not yet live).
+- **Click to zoom** Mermaid diagrams and pictures in the preview (`src/zoom-view.js`); Confluence pictures zoom in-app too.
+- **New app icon** (Espresso: cream note with a red bookmark ribbon on brown, `build/icon.svg` → `npm run icon`), also as the sidebar logo and the empty-state mark (inline SVG in index.html).
+
 ## 2026-11-17: Publish a notebook to Confluence
 
 - Right-click a notebook → **Publish to Confluence…**: notebook → Confluence folder, notes → pages, sub-notebooks → sub-folders. Notes already linked to a page push their edits there; API specs / HTML pages are skipped. Notes stay in their notebook (linked). Details: `docs/confluence-spec.md` → Publish a notebook.

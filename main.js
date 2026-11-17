@@ -174,6 +174,13 @@ function notebookDir(rel) {
   return inRoot(path.join(...parts));
 }
 
+const relOf = (full) => path.relative(rootDir(), full).split(path.sep).join('/');
+// "Parent/Parent.md": the note that is its notebook's own page (a note with sub-notes, like a Confluence parent page).
+function isOwnPageFile(file) {
+  const dir = path.dirname(file);
+  return !samePath(dir, rootDir()) && path.basename(file, path.extname(file)) === path.basename(dir);
+}
+
 function safeName(title) {
   const s = String(title)
     .replace(/[\/\\:*?"<>|#\x00-\x1f]/g, '')
@@ -598,6 +605,18 @@ ipcMain.handle('note:save', async (_e, p, meta, body, forceSnapshot) => {
   if (file.startsWith(trashDir() + path.sep)) throw new Error('Notes in the Trash are read-only');
   const title = String(meta.title || '').trim() || 'Untitled';
   const raw = !!rawKind(file);
+  // A note with sub-notes is its notebook's own page ("Parent/Parent.md"): renaming it renames the notebook too.
+  if (!raw && isOwnPageFile(file) && safeName(title) !== path.basename(path.dirname(file))) {
+    const dir = path.dirname(file);
+    const toDir = path.join(path.dirname(dir), safeName(title));
+    const fromRel = relOf(dir);
+    if (!fs.existsSync(toDir) && !isProjectName(fromRel)) {
+      await fsp.rename(dir, toDir);
+      await histMoved(dir, toDir);
+      await renameFolderLinks(fromRel, relOf(toDir)).catch(() => {});
+      file = path.join(toDir, path.basename(file));
+    }
+  }
   const desired = uniquePath(path.dirname(file), safeName(title), file, raw ? path.extname(file).toLowerCase() : '.md');
   if (desired !== file) {
     await fsp.rename(file, desired);
@@ -795,6 +814,33 @@ ipcMain.handle('notebook:rename', async (_e, rel, name) => {
   const newRel = [parent, safeName(name)].filter(Boolean).join('/');
   const to = notebookDir(newRel);
   if (fs.existsSync(to) && !samePath(from, to)) throw new Error(`A notebook named “${safeName(name)}” already exists`);
+  await fsp.rename(from, to);
+  await histMoved(from, to);
+  await renameFolderLinks(rel, newRel).catch(() => {});
+  if (config.projects[rel] && !rel.includes('/')) { config.projects[newRel] = config.projects[rel]; delete config.projects[rel]; saveConfig(); }
+  // Its own page ("Old/Old.md") follows the new name, so it stays the notebook's page.
+  const page = path.join(to, path.basename(from) + '.md');
+  if (!samePath(from, to) && fs.existsSync(page)) {
+    const note = parseNote(await fsp.readFile(page, 'utf8'));
+    const title = String(name).trim() || safeName(name);
+    const dest = uniquePath(to, safeName(title), page);
+    await fsp.writeFile(page, serializeNote({ ...note.meta, title }, note.body, path.basename(dest, '.md')), 'utf8');
+    if (!samePath(dest, page)) { await fsp.rename(page, dest); await histMoved(page, dest); }
+  }
+  return newRel;
+});
+
+// Move a notebook (with everything inside) into another notebook ('' = top level). Used by drag and drop in the sidebar.
+ipcMain.handle('notebook:move', async (_e, rel, parent) => {
+  if (!rel) throw new Error('Cannot move the Inbox');
+  if (parent === rel || parent.startsWith(rel + '/')) throw new Error('A notebook can’t go inside itself');
+  if (isProjectName(rel)) throw new Error('Projects stay at the top of the sidebar');
+  const from = notebookDir(rel);
+  const newRel = [parent, path.basename(from)].filter(Boolean).join('/');
+  if (newRel === rel) return rel;
+  const to = notebookDir(newRel);
+  if (fs.existsSync(to)) throw new Error(`There’s already a “${path.basename(from)}” there`);
+  await fsp.mkdir(path.dirname(to), { recursive: true });
   await fsp.rename(from, to);
   await histMoved(from, to);
   await renameFolderLinks(rel, newRel).catch(() => {});
@@ -1922,6 +1968,10 @@ ipcMain.handle('confluence:create-content', async (_e, { site, type, title, pare
     space ||= String(ref.spaceId || '');
   }
   if (!/^\d+$/.test(parent)) throw new Error('Couldn’t find where that lives in Confluence. Pick a page as the location instead.');
+  // A page needs its space: when it goes under a page we only know by id (a note with sub-notes), ask Confluence.
+  if (type === 'page' && !space) {
+    try { space = String((await atl.call('getConfluencePage', { cloudId: site, pageId: parent, contentFormat: 'markdown' })).spaceId || ''); } catch {}
+  }
   let r;
   try {
     r = await atl.call('createConfluenceContent', {

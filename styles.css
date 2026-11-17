@@ -129,7 +129,9 @@ body.single .toolbar { padding-left: 84px; }
   overflow: hidden;
 }
 .brand { padding: 0 18px 12px; font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
-.logo { color: var(--accent); }
+.logo { display: inline-flex; vertical-align: -3px; margin-right: 4px; }
+.logo .vn-mark { width: 17px; height: 17px; }
+svg.vn-mark { stroke: none; fill: initial; }
 .side-scroll { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
 .nav-item {
   display: flex; align-items: center; gap: 8px;
@@ -278,7 +280,8 @@ body.no-note #empty {
   display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
   color: var(--faint);
 }
-.empty-mark { font-size: 40px; color: var(--accent); opacity: 0.5; }
+.empty-mark { line-height: 0; opacity: 0.9; }
+.empty-mark .vn-mark { width: 64px; height: 64px; }
 #empty-new { margin-top: 8px; }
 .empty-hint { font-size: 12px; margin: 4px 0 0; }
 

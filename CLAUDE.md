@@ -31,6 +31,7 @@ Markdown note-taking app for macOS (Electron), built by Claude with and for the 
 
 ## Principles
 - **Notes are plain files.** `.md` files in a folder, notebooks = folders (nestable), metadata = YAML front matter (`title`, `tags`, `status`, `pinned`, `created`; unknown keys are preserved in `meta.extra`). Never introduce a database or hidden per-note state — the notes folder must stay syncable between Macs.
+- **Sub-notes = a folder with its own page.** A note with sub-notes lives inside a notebook of the same name (`Plan/Plan.md` + `Plan/Step.md`), like fetched Confluence parent pages. `isOwnPage` (renderer) / `isOwnPageFile` (main) recognise it; renaming either side renames both. The sidebar's Notebooks section is a page tree (`pageTree`).
 - **Title = file name.** The title field above the editor is the source of truth; saving renames the file. A `title:` line is written to front matter only when the title can't be a file name (`/ : ? …`) or got a ` 2` suffix. Titles no longer come from the note's first line (older notes may still start with a duplicate `# Title`).
 - Pasted/picked images go to `<notebook>/.assets/` (HEIC converted to JPEG with `sips`); moving a note copies its assets along. Trash = `<root>/.trash/` + `index.json`.
 - Local-only state (version history keyed by file inode, settings, agent chats) lives in `app.getPath('userData')`.
