@@ -8,7 +8,7 @@ Built with Electron. Personal project; macOS only.
 
 | Version | What it has | Where |
 |---|---|---|
-| **Stable** | Notes, the Claude panel, Confluence, API specs, Projects, the coding layout and draw.io diagrams | branch `main`, tags `v*-stable` (newest: `v1.2.1-stable`) |
+| **Stable** | Notes with sub-notes, the Claude panel, Confluence (with pictures and whole-notebook publishing), API specs, HTML pages, Projects, the coding layout and draw.io diagrams | branch `main`, tags `v*-stable` (newest: `v1.3.0-stable`) |
 | **Experimental** | Everything in stable, plus whatever is being tried next | branch `agent` |
 | Before Projects | Notes, the Claude panel, Confluence, API specs | tag `v1.1.0-stable` |
 | Notes only | The Markdown app before the Claude panel | tag `v1.0.2-stable` |
