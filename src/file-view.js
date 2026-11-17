@@ -13,7 +13,8 @@ const MAX_ROWS = 2000;
 const MAX_COLS = 60;
 
 export function createFileView({ api, container, el, toast, onSaved, toMarkdown, makeNote }) {
-  let shown = null; // { path, kind }
+  let shown = null; // { path, kind, seq }
+  let wanted = null; // the file asked for last (show() is called often; only the newest call builds the view)
   let frame = null;
   let pdfReady = null;
   let flushes = new Map();
@@ -46,9 +47,11 @@ export function createFileView({ api, container, el, toast, onSaved, toMarkdown,
     return b;
   }
 
-  async function showPdf(n) {
+  async function showPdf(n, seq) {
     pdfReady ??= api.files.pdfAvailable();
-    if (!(await pdfReady)) {
+    const ok = await pdfReady;
+    if (seq !== shown?.seq) return;
+    if (!ok) {
       container.append(bar(n), el('div', 'fv-msg', 'The PDF viewer is not part of this build (it is downloaded when VibeNote is built). Use “Open in Preview”.'));
       return;
     }
@@ -134,11 +137,14 @@ export function createFileView({ api, container, el, toast, onSaved, toMarkdown,
 
   return {
     async show(n) {
-      if (shown?.path === n.path) return;
-      await this.flush();
+      if (wanted === n.path) return;
+      wanted = n.path;
+      await this.flush(); // the previous PDF's unsaved highlights
+      if (wanted !== n.path) return; // another file was asked for meanwhile
       this.clear();
+      wanted = n.path;
       shown = { path: n.path, kind: n.kind, seq: Math.random() };
-      if (n.kind === 'pdf') await showPdf(n);
+      if (n.kind === 'pdf') await showPdf(n, shown.seq);
       else if (n.kind === 'docx') await showDocx(n, shown.seq);
       else if (n.kind === 'xlsx') await showXlsx(n, shown.seq);
     },
@@ -154,6 +160,7 @@ export function createFileView({ api, container, el, toast, onSaved, toMarkdown,
     },
     clear() {
       shown = null;
+      wanted = null;
       frame = null;
       flushes.forEach((f) => f());
       flushes = new Map();

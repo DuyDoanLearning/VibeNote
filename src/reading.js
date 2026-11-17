@@ -231,6 +231,7 @@ export function createReading(ctx) {
 
   // ---------- Save Web Page ----------
   function targetNotebook() {
+    if (S.home && !S.current) return S.home; // a project's home page is open: into that project
     const f = S.filter;
     if (f.type === 'notebook' && !f.name.startsWith('Confluence')) return f.name;
     const n = currentNote();

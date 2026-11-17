@@ -8,6 +8,8 @@ const ICON = {
   note: '<svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5"/></svg>',
   confluence: '<svg viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 00.6-7.95A6 6 0 006.2 9.5 4.3 4.3 0 007 18z"/></svg>',
   api: '<svg viewBox="0 0 24 24"><path d="M8 6l-5 6 5 6M16 6l5 6-5 6M14 4l-4 16"/></svg>',
+  html: '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 9h16M8 13l-2 2 2 2M16 13l2 2-2 2"/></svg>',
+  file: '<svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h6"/></svg>',
   book: '<svg viewBox="0 0 24 24"><path d="M5 4h12a2 2 0 012 2v14H7a2 2 0 01-2-2zM5 18a2 2 0 012-2h12"/></svg>',
   repo: '<svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="9" r="2.2"/><path d="M6 8.2v7.6M18 11.2c0 3-3 3.3-6 3.8-2 .3-4 .6-5 1.6"/></svg>',
   chat: '<svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>',
@@ -198,7 +200,7 @@ export function createProjectUI(ctx) {
       const li = el('li', 'ph-item');
       li.style.paddingLeft = `${6 + depth * 16 + 18}px`;
       const k = kindOf(n);
-      li.append(iconEl(ICON[k]), el('span', 'ph-item-title', n.title || 'Untitled'));
+      li.append(iconEl(ICON[k] || (['pdf', 'docx', 'xlsx'].includes(k) ? ICON.file : ICON.note)), el('span', 'ph-item-title', n.title || 'Untitled'));
       li.title = n.title || 'Untitled';
       if (S.cfChanged?.has(n.path)) li.append(chip('edited', 'warn'));
       else if (since && n.mtime > since) li.append(chip('changed', 'new'));
@@ -213,7 +215,7 @@ export function createProjectUI(ctx) {
       const chev = iconEl(ICON.chevron, 'ph-chev' + (open ? ' open' : ''));
       const cf = [nd.own, ...nd.pages].some((n) => n && kindOf(n) === 'confluence') || nd.key.startsWith('Confluence');
       const t = el('span', 'ph-item-title', nd.label);
-      li.append(chev, iconEl(nd.own ? ICON[kindOf(nd.own)] : cf ? ICON.confluence : ICON.book), t);
+      li.append(chev, iconEl(nd.own ? ICON[kindOf(nd.own)] || ICON.note : cf ? ICON.confluence : ICON.book), t);
       li.title = nd.own ? `${nd.label} — click the name to open the page, the arrow to fold` : isSource ? `${nd.key} (added to this project)` : nd.label;
       if (edited(nd)) li.append(chip('edited', 'warn'));
       li.append(el('span', 'ph-when', String(count(nd))));
