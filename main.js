@@ -126,7 +126,7 @@ const DEFAULT_SETTINGS = {
   writeModel: '',          // /claude writing ('' = same as the Claude panel)
   inlineSuggest: true,     // grey suggestions while writing (Tab to accept)
   suggestModel: 'haiku',   // model for inline suggestions
-  agentMode: 'default',    // default | acceptEdits | plan
+  agentMode: 'default',    // default | acceptEdits | allowAll (VibeNote approves; see autoAllowed) | plan
   agentClaudePath: '',     // '' = find the installed `claude` automatically
 };
 
@@ -859,6 +859,7 @@ ipcMain.handle('settings:set', (_e, patch) => {
   config.settings = { ...config.settings, ...patch };
   saveConfig();
   if ('agentModel' in patch) for (const st of chats.values()) st.chat?.setModel(patch.agentModel || '').catch(() => {});
+  if ('agentMode' in patch) for (const st of chats.values()) if (threadByKey(st.key)?.mode == null) st.chat?.setMode(sdkMode(patch.agentMode)).catch(() => {});
   if ('theme' in patch) applyTheme();
   broadcast('settings:changed', config.settings);
   return config.settings;
@@ -992,6 +993,18 @@ const chatPrefs = (key) => {
   const t = threadByKey(key) || {};
   return { model: t.model ?? config.settings.agentModel ?? '', effort: t.effort ?? config.settings.agentEffort ?? '', mode: t.mode ?? config.settings.agentMode ?? 'default' };
 };
+// "Allow everything" is VibeNote's own mode: Claude Code asks VibeNote about every step (its normal mode) and VibeNote
+// says yes itself, except to questions and plans (they need you) and commands that can't be undone (they still ask).
+// Not Claude Code's "accept edits" mode underneath: that one lets rm / mv through without asking anybody.
+const sdkMode = (mode) => (mode === 'allowAll' ? 'default' : mode || 'default');
+const mustAsk = (key, tool, input) => chatPrefs(key).mode === 'allowAll' && tool === 'Bash' && RISKY.test(String(input?.command || ''));
+const RISKY = /\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*[rR])|\bsudo\b|\bgit\s+push\b[^\n]*\s(--force\b|-f\b|--force-with-lease\b)|\bgit\s+reset\s+--hard\b|\bgit\s+clean\s+-[a-zA-Z]*f|\bmkfs\b|\bdd\s+if=|\bdiskutil\s+erase|>\s*\/dev\/(disk|sd)/;
+function autoAllowed(key, tool, input) {
+  if (chatPrefs(key).mode !== 'allowAll') return false;
+  if (tool === 'AskUserQuestion' || tool === 'ExitPlanMode') return false;
+  if (tool === 'Bash' && RISKY.test(String(input?.command || ''))) return false;
+  return true;
+}
 const isProjectName = (name) => !!name && (!!config.projects[name] || fs.existsSync(path.join(rootDir(), name, projects.BRIEF)));
 
 // The project a notebook belongs to, and which of its chats is in front.
@@ -1045,6 +1058,11 @@ function agentSend(wc, key, evt) {
 }
 
 // Keep a condensed transcript for display/resume.
+// Long tool inputs (a whole file for Write…) are shortened before they're kept in the chat file.
+function trimInput(input) {
+  if (!input || typeof input !== 'object') return input;
+  return Object.fromEntries(Object.entries(input).map(([k, v]) => [k, typeof v === 'string' && v.length > 2000 ? v.slice(0, 2000) + '…' : v]));
+}
 function record(state, evt) {
   const items = state.items;
   const last = items[items.length - 1];
@@ -1059,6 +1077,20 @@ function record(state, evt) {
     case 'tool_result': {
       const t = items.find((i) => i.kind === 'tool' && i.id === evt.id);
       if (t) { t.done = true; t.isError = evt.isError; t.result = evt.text.slice(0, 1500); }
+      break;
+    }
+    // A helper agent's steps are kept on the tool row that started it (Task / Agent), so they can be opened later.
+    case 'sub_tool': case 'sub_text': case 'sub_result': case 'task': {
+      const t = items.find((i) => i.kind === 'tool' && i.id === (evt.parent || evt.toolUseId));
+      if (!t) break;
+      if (evt.kind === 'task') { t.task = { ...t.task, ...Object.fromEntries(Object.entries({ status: evt.status, description: evt.description, tokens: evt.tokens, steps: evt.steps, summary: evt.summary }).filter(([, v]) => v != null)) }; break; }
+      t.sub ||= [];
+      if (evt.kind === 'sub_result') {
+        const step = t.sub.find((x) => x.id === evt.id);
+        if (step) { step.done = true; step.isError = evt.isError; step.result = String(evt.text || '').slice(0, 1200); }
+      } else if (t.sub.length < 400) {
+        t.sub.push(evt.kind === 'sub_text' ? { kind: 'text', text: String(evt.text).slice(0, 4000) } : { kind: 'tool', id: evt.id, name: evt.name, input: trimInput(evt.input) });
+      }
       break;
     }
     case 'result': items.push({ kind: 'result', isError: evt.isError, durationMs: evt.durationMs, turns: evt.turns, outputTokens: evt.outputTokens }); writeChat(state.key, state); break;
@@ -1088,7 +1120,8 @@ async function ensureChat(wc, key, project) {
     appendSystemPrompt: systemPromptFor(project, info),
     model: chatPrefs(key).model,
     effort: chatPrefs(key).effort || undefined,
-    permissionMode: chatPrefs(key).mode,
+    permissionMode: sdkMode(chatPrefs(key).mode),
+    mustAsk: (tool, input) => mustAsk(key, tool, input),
     resume: state.sessionId,
     claudePath,
     env,
@@ -1124,6 +1157,7 @@ async function ensureChat(wc, key, project) {
       agentSend(state.wc, key, evt);
     },
     askPermission: ({ tool, input, title, reason, suggestions, signal }) => new Promise((resolve) => {
+      if (autoAllowed(key, tool, input)) return resolve({ behavior: 'allow', updatedInput: input });
       const id = `p${++permSeq}`;
       const finish = (decision) => {
         permissionWaits.delete(id);
@@ -1136,7 +1170,8 @@ async function ensureChat(wc, key, project) {
       };
       permissionWaits.set(id, { finish, input, suggestions });
       signal?.addEventListener('abort', () => { if (permissionWaits.has(id)) { finish(null); agentSend(state.wc, key, { kind: 'permission_cancel', id }); } });
-      const evt = { kind: 'permission', id, tool, input, title, reason, canRemember: !!suggestions?.length };
+      const risky = chatPrefs(key).mode === 'allowAll' && tool === 'Bash';
+      const evt = { kind: 'permission', id, tool, input, title, reason: risky ? 'Asked even with “Allow everything”: this command can’t be undone.' : reason, canRemember: !!suggestions?.length && !risky };
       state.pending.set(id, evt); // so the card can be shown again when the user comes back to this chat
       agentSend(state.wc, key, evt);
     }),
@@ -1266,7 +1301,17 @@ ipcMain.handle('agent:mcp', async (e, nb) => (await liveChat(e, nb)).mcpStatus()
 ipcMain.handle('agent:mode', async (_e, key, mode) => {
   const th = threadByKey(key);
   if (th) { th.mode = mode; saveThreads(); }
-  await chats.get(key)?.chat.setMode(mode);
+  const st = chats.get(key);
+  await st?.chat.setMode(sdkMode(mode));
+  // Switching to "Allow everything" also approves what's already waiting (except questions, plans and risky commands).
+  if (st && mode === 'allowAll') {
+    for (const [id, evt] of [...st.pending]) {
+      const w = permissionWaits.get(id);
+      if (!w || !autoAllowed(key, evt.tool, evt.input)) continue;
+      w.finish({ behavior: 'allow', updatedInput: w.input });
+      agentSend(st.wc, key, { kind: 'permission_cancel', id, label: 'Allowed (Allow everything)' });
+    }
+  }
 });
 ipcMain.handle('agent:new', (_e, key) => {
   const st = chats.get(key);

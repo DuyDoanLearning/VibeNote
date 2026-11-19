@@ -132,13 +132,18 @@ export class AgentChat {
             },
             allowedTools: ['mcp__vibenote__note_history'],
           }),
-          // Snapshot notes before/after Claude edits them (works in every permission mode).
-          ...(o.onFileEdit && {
-            hooks: {
-              PreToolUse: [{ matcher: 'Edit|Write|MultiEdit', hooks: [async (input) => { await o.onFileEdit('before', input.tool_input?.file_path); return { continue: true }; }] }],
-              PostToolUse: [{ matcher: 'Edit|Write|MultiEdit', hooks: [async (input) => { await o.onFileEdit('after', input.tool_input?.file_path); return { continue: true }; }] }],
-            },
-          }),
+          hooks: {
+            PreToolUse: [
+              // Snapshot notes before/after Claude edits them (works in every permission mode).
+              ...(o.onFileEdit ? [{ matcher: 'Edit|Write|MultiEdit', hooks: [async (input) => { await o.onFileEdit('before', input.tool_input?.file_path); return { continue: true }; }] }] : []),
+              // Commands that can't be undone always come back to the user, even when a mode or a settings rule would let
+              // them through on its own.
+              ...(o.mustAsk ? [{ matcher: 'Bash', hooks: [async (input) => (o.mustAsk(input.tool_name, input.tool_input)
+                ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: 'This command can’t be undone.' } }
+                : { continue: true })] }] : []),
+            ],
+            ...(o.onFileEdit && { PostToolUse: [{ matcher: 'Edit|Write|MultiEdit', hooks: [async (input) => { await o.onFileEdit('after', input.tool_input?.file_path); return { continue: true }; }] }] }),
+          },
           abortController: this.controller,
           canUseTool: (tool, input, extra) => o.askPermission({
             tool, input, title: extra.title, reason: extra.decisionReason, suggestions: extra.suggestions, signal: extra.signal,
@@ -187,7 +192,7 @@ export class AgentChat {
         break;
       }
       case 'tool_progress':
-        if (m.parent_tool_use_id) emit({ kind: 'sub_tool', parent: m.parent_tool_use_id, name: m.tool_name });
+        if (m.parent_tool_use_id) emit({ kind: 'sub_progress', parent: m.parent_tool_use_id, id: m.tool_use_id, name: m.tool_name, seconds: m.elapsed_time_seconds });
         else emit({ kind: 'tool_progress', id: m.tool_use_id, seconds: m.elapsed_time_seconds });
         break;
       case 'stream_event': {
@@ -209,7 +214,11 @@ export class AgentChat {
       }
       case 'assistant': {
         if (m.parent_tool_use_id) {
-          for (const b of m.message?.content || []) if (b.type === 'tool_use') emit({ kind: 'sub_tool', parent: m.parent_tool_use_id, name: b.name, input: b.input });
+          // A helper agent's own steps and words, so the panel can show what each helper is doing.
+          for (const b of m.message?.content || []) {
+            if (b.type === 'tool_use') emit({ kind: 'sub_tool', parent: m.parent_tool_use_id, id: b.id, name: b.name, input: b.input });
+            if (b.type === 'text' && b.text.trim()) emit({ kind: 'sub_text', parent: m.parent_tool_use_id, text: b.text });
+          }
           break;
         }
         for (const b of m.message?.content || []) {
@@ -221,7 +230,6 @@ export class AgentChat {
         break;
       }
       case 'user': {
-        if (m.parent_tool_use_id) break; // a helper agent's own tool results
         const content = m.message?.content;
         if (!Array.isArray(content)) break;
         for (const b of content) {
@@ -229,7 +237,8 @@ export class AgentChat {
           const text = Array.isArray(b.content)
             ? b.content.map((c) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n')
             : String(b.content ?? '');
-          emit({ kind: 'tool_result', id: b.tool_use_id, isError: !!b.is_error, text: text.slice(0, 4000) });
+          if (m.parent_tool_use_id) emit({ kind: 'sub_result', parent: m.parent_tool_use_id, id: b.tool_use_id, isError: !!b.is_error, text: text.slice(0, 1500) });
+          else emit({ kind: 'tool_result', id: b.tool_use_id, isError: !!b.is_error, text: text.slice(0, 4000) });
         }
         break;
       }

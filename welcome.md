@@ -68,7 +68,7 @@ Your notes are plain **Markdown files** in a folder on your Mac. Folders are not
 
 ## Watching Claude work
 
-- The Claude panel shows what Claude is doing, like Claude Code in Terminal: its **thinking** (live, then folded into "✻ Thought for 5s"), each **step** as it starts (with a short result such as "→ 120 lines" or "→ +3 −1"), to-do lists, helper agents' progress, and a status line with time and tokens.
+- The Claude panel shows what Claude is doing, like Claude Code in Terminal: its **thinking** (live, then folded into "✻ Thought for 5s"), each **step** as it starts (with a short result such as "→ 120 lines" or "→ +3 −1"), to-do lists, **helper agents** (click one to see every step it takes), and a status line with time and tokens. Tired of approving each step? Pick **Allow everything** in the menu at the top of the panel (it still asks before commands that can't be undone).
 - Click a step to see the details — edits show as a red/green diff.
 - Press **Esc** in the Claude panel to stop Claude while it works.
 - Type **/** in the Claude panel for commands: **/model** (switch model — or click the model button at the top), **/effort**, **/usage** (plan limits and what the chat cost), **/context**, **/clear**, **/chats**, **/mcp**, **/help** — plus all your Claude Code commands and skills (/compact, /init, /code-review…).

@@ -2,6 +2,7 @@
 import { renderMarkdown } from './markdown.js';
 import { createSlash, prettyModel } from './agent-slash.js';
 import { createMentions } from './agent-mention.js';
+import { createHelpers } from './agent-helpers.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const el = (tag, cls, text) => {
@@ -51,6 +52,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
       <select class="agent-mode" title="What Claude may do without asking">
         <option value="default">Ask every time</option>
         <option value="acceptEdits">Auto-approve edits</option>
+        <option value="allowAll">Allow everything</option>
         <option value="plan">Plan only</option>
       </select>
       <button class="icon agent-chats" title="Past chats (read, continue, save as note)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg></button>
@@ -80,6 +82,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
   const log = $('.agent-log');
   const input = $('.agent-input');
   const status = $('.agent-status');
+  const helpers = createHelpers({ root, log, el, md, toolSummary, resultSummary, permissionDetail, fmtTokens, fmtSecs, scroll: (f) => scroll(f) });
 
   let ctx = null; // { key, name, thread, notebook, repo, claudePath, busy, items, pending }
   let threads = null; // { active, list: [{ id, key, title, scope, status }], repos }
@@ -210,6 +213,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
       b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openFile(String(r.input.file_path)); });
       r.row.querySelector('summary').append(b);
     }
+    if (helpers.isHelper(r.name)) helpers.start(t.id, r.input, r.wrap, t.sub || t.task || t.done ? t : null);
     if (Object.keys(r.input).length) activity(doing(r.name, r.input));
     if (t.done) markTool(t.id, t.isError, t.result);
     scroll();
@@ -252,19 +256,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
       out.textContent = text;
       r.row.append(out);
     }
-    r.sub?.classList.add('done');
-  }
-
-  // Helper agent progress under its tool row.
-  function subProgress(id, { steps, last, tokens, status }) {
-    const r = toolRows.get(id);
-    if (!r) return;
-    if (!r.sub) { r.sub = el('div', 'tool-sub'); r.wrap.append(r.sub); }
-    if (steps != null) r.steps = steps; else r.steps++;
-    if (last) r.last = last;
-    if (tokens) r.tokens = tokens;
-    r.sub.textContent = `↳ ${r.steps} step${r.steps === 1 ? '' : 's'}${r.last ? ` · ${r.last}` : ''}${r.tokens ? ` · ${fmtTokens(r.tokens)} tokens` : ''}${status && status !== 'running' ? ` · ${status}` : ''}`;
-    scroll();
+    if (helpers.isHelper(r.name)) helpers.done(id, isError, text);
   }
 
   // To-do list (TodoWrite) as a live checklist.
@@ -493,6 +485,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
   function renderHistory(items) {
     log.textContent = '';
     toolRows.clear();
+    helpers.reset();
     finishLive();
     if (!items.length) {
       const hello = el('div', 'agent-empty');
@@ -521,7 +514,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
     $('.agent-send').hidden = b && !input.value.trim();
     root.classList.toggle('busy', b);
     if (b && !turn) startTurn();
-    if (!b) { endTurn(); status.textContent = ''; }
+    if (!b) { endTurn(); status.textContent = ''; helpers.turnEnded(); }
   }
 
   function setMode(mode) {
@@ -712,8 +705,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
         if (r && evt.seconds >= 2) r.row.querySelector('.tool-time').textContent = fmtSecs(evt.seconds * 1000);
         break;
       }
-      case 'task': if (evt.toolUseId) subProgress(evt.toolUseId, { steps: evt.steps, last: evt.lastTool, tokens: evt.tokens, status: evt.status }); break;
-      case 'sub_tool': subProgress(evt.parent, { last: evt.input ? toolSummary(evt.name, evt.input) : evt.name }); break;
+      case 'task': case 'sub_tool': case 'sub_text': case 'sub_result': case 'sub_progress': helpers.event(evt); break;
       case 'note': log.append(el('div', 'result-line', evt.text)); scroll(); break;
       case 'restart': log.append(el('div', 'result-line', evt.text)); scroll(); setBusy(true); break;
       case 'tool_result': {
@@ -725,7 +717,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
       case 'permission': addPermission(evt); break;
       case 'permission_cancel': {
         const card = cards.get(evt.id);
-        if (card) { card.classList.add('answered'); card.querySelector('.perm-actions')?.replaceWith(el('div', 'perm-answer', 'Cancelled')); cards.delete(evt.id); }
+        if (card) { card.classList.add('answered'); card.querySelector('.perm-actions')?.replaceWith(el('div', 'perm-answer', evt.label || 'Cancelled')); cards.delete(evt.id); }
         break;
       }
       case 'status': activity(/^requesting$/i.test(evt.text) ? 'Thinking' : evt.text.replace(/^./, (c) => c.toUpperCase())); break;
@@ -759,6 +751,7 @@ export function createAgentPanel({ api, getContext, beforeSend, onNoteMaybeChang
 
   // Esc while Claude works = stop it (like Claude Code). Works anywhere in the panel.
   root.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !e.defaultPrevented && helpers.isOpen()) { e.preventDefault(); helpers.close(); return; } // first Esc leaves a helper's view
     if (e.key !== 'Escape' || e.defaultPrevented || !ctx?.busy) return;
     e.preventDefault();
     userStopped = true;

@@ -1157,3 +1157,32 @@ html[data-builtin-theme="lamplight"] #comment-float { color: #14171C; box-shadow
 .zv-bar button { min-width: 30px; height: 28px; padding: 0 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
 .zv-bar button:hover { background: var(--border); }
 .zv-bar .zv-pct { min-width: 56px; font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* Helper agents (subagents) in the Claude panel — src/agent-helpers.js */
+.helper-line { display: flex; align-items: center; gap: 7px; margin: 1px 0 3px 21px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--muted); font-size: 11.5px; text-align: left; cursor: pointer; min-width: 0; }
+.helper-line:hover { border-color: var(--accent); color: var(--text); }
+.helper-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.helper-open { color: var(--accent); font-weight: 600; flex: none; }
+.helper-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--faint); }
+[data-state=running] > .helper-dot, .helper-chip .helper-dot { background: var(--accent); animation: blink 1s steps(1) infinite; }
+[data-state=done] > .helper-dot { background: #16a34a; }
+[data-state=failed] > .helper-dot { background: #dc2626; }
+.helper-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--accent-soft); }
+.helper-strip-title { font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; margin-right: 2px; }
+.helper-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 11.5px; cursor: pointer; }
+.helper-chip > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.helper-chip:hover { border-color: var(--accent); }
+.helper-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.helper-view[hidden] { display: none; }
+.helper-head { padding: 8px 14px 10px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
+.helper-back { align-self: flex-start; padding: 2px 8px 2px 4px; border-radius: 6px; color: var(--accent); font-size: 12px; font-weight: 600; }
+.helper-back:hover { background: var(--hover); }
+.helper-title { font-weight: 700; font-size: 14px; }
+.helper-status { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+.helper-body { flex: 1; overflow-y: auto; padding: 10px 14px 20px; display: flex; flex-direction: column; gap: 8px; user-select: text; }
+.helper-steps { display: flex; flex-direction: column; gap: 4px; }
+.helper-ask { font-size: 12.5px; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; background: var(--bg); }
+.helper-ask summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+.helper-said { font-size: 12.5px; color: var(--muted); }
+.helper-report-title { margin-top: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.helper-wait { font-size: 12px; color: var(--faint); }

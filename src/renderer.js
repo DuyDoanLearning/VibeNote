@@ -1812,6 +1812,8 @@ async function openSettings() {
       <label class="row"><span>Sync preview scrolling</span><input type="checkbox" data-k="scrollSync"></label>
       <div class="group-label">Claude</div>
       <label class="row"><span>Claude panel model</span><select data-k="agentModel">${MODEL_OPTS('Claude Code’s default')}</select></label>
+      <label class="row"><span>What Claude may do without asking</span><select data-k="agentMode"><option value="default">Ask every time</option><option value="acceptEdits">Auto-approve edits</option><option value="allowAll">Allow everything</option><option value="plan">Plan only</option></select></label>
+      <p class="path">For every chat that hasn’t picked its own (the menu at the top of the Claude panel changes one chat). “Allow everything” still asks before commands that can’t be undone (rm -rf, sudo, git push --force, git reset --hard).</p>
       <label class="row"><span>Comments &amp; suggested fixes</span><select data-k="commentModel">${MODEL_OPTS('Same as Claude panel')}</select></label>
       <label class="row"><span>/claude writing</span><select data-k="writeModel">${MODEL_OPTS('Same as Claude panel')}</select></label>
       <label class="row"><span>Inline suggestions while writing (Tab to accept)</span><input type="checkbox" data-k="inlineSuggest"></label>

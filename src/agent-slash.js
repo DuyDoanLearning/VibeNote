@@ -31,7 +31,8 @@ const LIMITS = {
   seven_day_cowork: 'This week · Cowork',
 };
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
-const MODES = { ask: 'default', default: 'default', edits: 'acceptEdits', acceptedits: 'acceptEdits', auto: 'acceptEdits', plan: 'plan' };
+const MODES = { ask: 'default', default: 'default', edits: 'acceptEdits', acceptedits: 'acceptEdits', auto: 'acceptEdits', plan: 'plan', all: 'allowAll', allowall: 'allowAll', yolo: 'allowAll', bypass: 'allowAll' };
+const MODE_NAMES = { default: 'Ask every time', acceptEdits: 'Auto-approve edits', allowAll: 'Allow everything (still asks before commands that can’t be undone)', plan: 'Plan only' };
 const fmtTok = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n || 0));
 const when = (iso) => {
   if (!iso) return '';
@@ -295,12 +296,12 @@ export function createSlash({ api, input, menuHost, getNotebook, addCard, action
     const m = MODES[arg.toLowerCase()];
     if (!m) {
       const c = card('Mode — what Claude may do without asking');
-      c.append(el('div', 'slash-note', 'Use /mode ask, /mode edits (auto-approve edits) or /mode plan — or the menu at the top of the panel.'));
+      c.append(el('div', 'slash-note', 'Use /mode ask, /mode edits (auto-approve edits), /mode all (allow everything) or /mode plan — or the menu at the top of the panel.'));
       addCard(c);
       return;
     }
     actions.setMode(m);
-    addCard(el('div', 'result-line', `Mode: ${{ default: 'Ask every time', acceptEdits: 'Auto-approve edits', plan: 'Plan only' }[m]}`));
+    addCard(el('div', 'result-line', `Mode: ${MODE_NAMES[m]}`));
   }
 
   async function mcp(nb) {
